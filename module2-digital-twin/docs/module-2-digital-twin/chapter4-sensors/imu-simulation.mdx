@@ -1,0 +1,684 @@
+---
+title: 'IMU Simulation'
+description: 'Simulating Inertial Measurement Units for robot state estimation and navigation'
+tags: ['imu', 'simulation', 'sensors', 'inertial', 'navigation', 'robotics', 'state-estimation']
+sidebar_position: 4
+---
+
+# IMU Simulation
+
+Inertial Measurement Units (IMUs) provide crucial information about a robot's motion and orientation through measurements of linear acceleration and angular velocity. This chapter covers the principles of IMU simulation, implementation techniques, and best practices for creating realistic IMU data in simulation environments.
+
+## Understanding IMU Technology
+
+### How IMUs Work
+
+An IMU typically contains three types of sensors:
+
+- **Accelerometers**: Measure linear acceleration along three axes
+- **Gyroscopes**: Measure angular velocity around three axes
+- **Magnetometers**: Measure magnetic field strength (often included as a separate sensor)
+
+The combination of these measurements allows for estimation of:
+
+- **Orientation**: Roll, pitch, and yaw angles
+- **Velocity**: Through integration of acceleration data
+- **Position**: Through double integration of acceleration data
+- **Motion Detection**: Sudden changes in movement patterns
+
+### IMUs in Robotics
+
+IMUs are essential for:
+
+- **State Estimation**: Determining robot pose and motion
+- **Navigation**: Dead reckoning and sensor fusion
+- **Stabilization**: Maintaining balance in legged robots
+- **Control**: Providing feedback for motion control systems
+- **SLAM**: Improving localization accuracy
+
+## Types of IMU Sensors
+
+### Consumer-Grade IMUs
+
+Common low-cost IMUs include:
+
+- **MPU6050**: 6-axis (accelerometer + gyroscope) with integrated DMP
+- **MPU9250**: 9-axis (with integrated magnetometer)
+- **LSM6DSOX**: 6-axis IMU with advanced features
+
+### Tactical-Grade IMUs
+
+Higher accuracy IMUs for demanding applications:
+
+- **ADIS16470**: High-performance tactical-grade IMU
+- **BMI160**: Low-power, high-accuracy IMU
+- **ICM-20689**: High-performance 6-axis IMU
+
+### Navigation-Grade IMUs
+
+For the most demanding applications:
+
+- **Honeywell HG4930**: Ring laser gyroscope IMU
+- **Northrop Grumman LN-270**: Fiber optic gyroscope IMU
+
+## IMU Simulation Principles
+
+### Physical Model
+
+IMU simulation involves modeling the physics of motion and sensor behavior:
+
+1. **True Motion**: The actual motion of the robot in the environment
+2. **Sensor Response**: How the sensor measures the motion
+3. **Noise Addition**: Realistic noise characteristics
+4. **Bias and Drift**: Long-term sensor inaccuracies
+
+### Key Parameters for IMU Simulation
+
+#### Accelerometer Parameters
+- **Measurement Range**: Maximum measurable acceleration (e.g., ±2g, ±16g)
+- **Resolution**: Smallest detectable acceleration change
+- **Bandwidth**: Frequency range of accurate measurements
+- **Bias**: Constant offset in measurements
+- **Scale Factor Error**: Proportional error in measurements
+- **Cross-Axis Sensitivity**: Crosstalk between axes
+
+#### Gyroscope Parameters
+- **Measurement Range**: Maximum measurable angular velocity (e.g., ±250°/s, ±2000°/s)
+- **Resolution**: Smallest detectable angular velocity change
+- **Bias**: Constant offset in measurements
+- **Scale Factor Error**: Proportional error in measurements
+- **Angular Random Walk**: Noise component proportional to integration time
+- **Rate Random Walk**: Noise component proportional to square root of integration time
+
+#### Noise Characteristics
+- **White Noise**: Random, uncorrelated noise
+- **Bias Instability**: Slowly varying bias over time
+- **Quantization Noise**: Discrete step noise from digitization
+
+## Implementing IMU Simulation
+
+### Gazebo IMU Simulation
+
+Gazebo provides built-in support for IMU simulation through the `libgazebo_ros_imu.so` plugin:
+
+```xml
+<gazebo reference="imu_link">
+  <sensor name="imu_sensor" type="imu">
+    <always_on>true</always_on>
+    <update_rate>100</update_rate>
+    <visualize>true</visualize>
+    <topic>__default_topic__</topic>
+    <plugin name="imu_plugin" filename="libgazebo_ros_imu.so">
+      <ros>
+        <namespace>/robot_name</namespace>
+        <remapping>imu:=/imu/data</remapping>
+      </ros>
+      <initial_orientation_as_reference>false</initial_orientation_as_reference>
+      <body_name>imu_link</body_name>
+      <topic_name>imu/data</topic_name>
+      <serviceName>imu/service</serviceName>
+      <gaussian_noise>0.001</gaussian_noise>
+      <update_rate>100.0</update_rate>
+    </plugin>
+  </sensor>
+</gazebo>
+```
+
+For more detailed configuration with realistic noise models:
+
+```xml
+<gazebo reference="imu_link">
+  <sensor name="detailed_imu_sensor" type="imu">
+    <always_on>true</always_on>
+    <update_rate>100</update_rate>
+    <visualize>true</visualize>
+
+    <imu>
+      <!-- Accelerometer properties -->
+      <accelerometer>
+        <x>
+          <noise type="gaussian">
+            <mean>0.0</mean>
+            <stddev>0.017</stddev>  <!-- 100ug at 100Hz -->
+            <bias_mean>0.1</bias_mean>
+            <bias_stddev>0.001</bias_stddev>
+          </noise>
+        </x>
+        <y>
+          <noise type="gaussian">
+            <mean>0.0</mean>
+            <stddev>0.017</stddev>
+            <bias_mean>0.1</bias_mean>
+            <bias_stddev>0.001</bias_stddev>
+          </noise>
+        </y>
+        <z>
+          <noise type="gaussian">
+            <mean>0.0</mean>
+            <stddev>0.017</stddev>
+            <bias_mean>0.1</bias_mean>
+            <bias_stddev>0.001</bias_stddev>
+          </noise>
+        </z>
+      </accelerometer>
+
+      <!-- Gyroscope properties -->
+      <gyroscope>
+        <x>
+          <noise type="gaussian">
+            <mean>0.0</mean>
+            <stddev>0.001</stddev>  <!-- 0.01 deg/s at 100Hz -->
+            <bias_mean>0.0</bias_mean>
+            <bias_stddev>0.0001</bias_stddev>
+          </noise>
+        </x>
+        <y>
+          <noise type="gaussian">
+            <mean>0.0</mean>
+            <stddev>0.001</stddev>
+            <bias_mean>0.0</bias_mean>
+            <bias_stddev>0.0001</bias_stddev>
+          </noise>
+        </y>
+        <z>
+          <noise type="gaussian">
+            <mean>0.0</mean>
+            <stddev>0.001</stddev>
+            <bias_mean>0.0</bias_mean>
+            <bias_stddev>0.0001</bias_stddev>
+          </noise>
+        </z>
+      </gyroscope>
+    </imu>
+
+    <plugin name="detailed_imu_plugin" filename="libgazebo_ros_imu.so">
+      <ros>
+        <namespace>/robot_name</namespace>
+        <remapping>imu:=/imu/data</remapping>
+      </ros>
+      <body_name>imu_link</body_name>
+      <topic_name>imu/data</topic_name>
+      <serviceName>imu/service</serviceName>
+      <gaussian_noise>0.0</gaussian_noise>
+      <update_rate>100.0</update_rate>
+    </plugin>
+  </sensor>
+</gazebo>
+```
+
+### Unity IMU Simulation
+
+Unity can simulate IMU data by differentiating the robot's motion:
+
+```csharp
+using UnityEngine;
+using System.Collections;
+using Unity.Robotics.ROSTCPConnector;
+using Unity.Robotics.ROSTCPConnector.MessageTypes.Sensor_msgs;
+using Unity.Robotics.ROSTCPConnector.MessageTypes.Geometry_msgs;
+using Unity.Robotics.ROSTCPConnector.MessageTypes.Std_msgs;
+using System;
+
+public class UnityIMUSimulator : MonoBehaviour
+{
+    [Header("IMU Configuration")]
+    public float updateRate = 100.0f; // Hz
+    public bool includeMagnetometer = false;
+
+    [Header("Noise Parameters - Accelerometer")]
+    public float accNoiseStdDev = 0.017f; // 100ug
+    public float accBiasStdDev = 0.001f;
+    public float accBiasDrift = 0.0001f;
+
+    [Header("Noise Parameters - Gyroscope")]
+    public float gyroNoiseStdDev = 0.001f; // 0.01 deg/s
+    public float gyroBiasStdDev = 0.0001f;
+    public float gyroBiasDrift = 0.00001f;
+
+    [Header("Gravity Parameters")]
+    public Vector3 gravity = new Vector3(0, -9.81f, 0);
+
+    private float publishInterval;
+    private float lastPublishTime;
+    private ROSConnection ros;
+
+    // IMU state tracking
+    private Vector3 lastPosition;
+    private Quaternion lastRotation;
+    private float lastTime;
+
+    // Bias tracking
+    private Vector3 accBias;
+    private Vector3 gyroBias;
+    private Vector3 accBiasDriftAccumulator;
+    private Vector3 gyroBiasDriftAccumulator;
+
+    // For ROS communication
+    private string imuTopic = "/imu/data";
+
+    void Start()
+    {
+        ros = ROSConnection.GetOrCreateInstance();
+        publishInterval = 1.0f / updateRate;
+        lastPublishTime = 0;
+
+        lastPosition = transform.position;
+        lastRotation = transform.rotation;
+        lastTime = Time.time;
+
+        // Initialize bias values
+        accBias = new Vector3(
+            UnityEngine.Random.Range(-accBiasStdDev, accBiasStdDev),
+            UnityEngine.Random.Range(-accBiasStdDev, accBiasStdDev),
+            UnityEngine.Random.Range(-accBiasStdDev, accBiasStdDev)
+        );
+
+        gyroBias = new Vector3(
+            UnityEngine.Random.Range(-gyroBiasStdDev, gyroBiasStdDev),
+            UnityEngine.Random.Range(-gyroBiasStdDev, gyroBiasStdDev),
+            UnityEngine.Random.Range(-gyroBiasStdDev, gyroBiasStdDev)
+        );
+    }
+
+    void Update()
+    {
+        if (Time.time - lastPublishTime >= publishInterval)
+        {
+            SimulateIMUData();
+            lastPublishTime = Time.time;
+        }
+
+        // Update bias drift over time
+        UpdateBiasDrift();
+    }
+
+    void SimulateIMUData()
+    {
+        float deltaTime = Time.time - lastTime;
+
+        if (deltaTime > 0)
+        {
+            // Calculate linear acceleration (in world frame)
+            Vector3 velocity = (transform.position - lastPosition) / deltaTime;
+            Vector3 lastVelocity = (lastPosition - GetPreviousPosition(deltaTime * 2)) / deltaTime;
+            Vector3 linearAcceleration = (velocity - lastVelocity) / deltaTime;
+
+            // Convert to IMU frame (robot's local frame)
+            Vector3 imuLinearAcceleration = transform.InverseTransformDirection(linearAcceleration);
+
+            // Add gravity to get specific force
+            Vector3 gravityInImuFrame = transform.InverseTransformDirection(gravity);
+            Vector3 specificForce = imuLinearAcceleration - gravityInImuFrame;
+
+            // Calculate angular velocity
+            Quaternion deltaRotation = transform.rotation * Quaternion.Inverse(lastRotation);
+            Vector3 angularVelocity = GetAngularVelocityFromQuaternion(deltaRotation, deltaTime);
+
+            // Apply noise and bias
+            Vector3 noisyAcc = AddNoiseAndBias(specificForce, accNoiseStdDev, accBias, accBiasDriftAccumulator);
+            Vector3 noisyGyro = AddNoiseAndBias(angularVelocity, gyroNoiseStdDev, gyroBias, gyroBiasDriftAccumulator);
+
+            // Publish IMU data
+            PublishIMUData(noisyAcc, noisyGyro, transform.rotation);
+
+            // Update tracking variables
+            lastPosition = transform.position;
+            lastRotation = transform.rotation;
+            lastTime = Time.time;
+        }
+    }
+
+    Vector3 GetPreviousPosition(float deltaTime)
+    {
+        // This is a simplified approach; in a real system, you'd store a history of positions
+        // For now, we'll return a position that maintains the previous velocity
+        return lastPosition - (transform.position - lastPosition) * (deltaTime / (Time.time - lastTime));
+    }
+
+    Vector3 GetAngularVelocityFromQuaternion(Quaternion deltaRot, float deltaTime)
+    {
+        // Extract angular velocity from quaternion difference
+        // This is a simplified approximation
+        Vector3 angularVelocity = new Vector3(
+            2.0f * Mathf.Atan2(deltaRot.x, deltaRot.w) / deltaTime,
+            2.0f * Mathf.Atan2(deltaRot.y, deltaRot.w) / deltaTime,
+            2.0f * Mathf.Atan2(deltaRot.z, deltaRot.w) / deltaTime
+        );
+        return angularVelocity;
+    }
+
+    Vector3 AddNoiseAndBias(Vector3 measurement, float noiseStdDev, Vector3 bias, Vector3 drift)
+    {
+        Vector3 noise = new Vector3(
+            RandomGaussian(0, noiseStdDev),
+            RandomGaussian(0, noiseStdDev),
+            RandomGaussian(0, noiseStdDev)
+        );
+        return measurement + bias + drift + noise;
+    }
+
+    void UpdateBiasDrift()
+    {
+        // Update bias drift with random walk
+        accBiasDriftAccumulator += new Vector3(
+            RandomGaussian(0, accBiasDrift),
+            RandomGaussian(0, accBiasDrift),
+            RandomGaussian(0, accBiasDrift)
+        );
+
+        gyroBiasDriftAccumulator += new Vector3(
+            RandomGaussian(0, gyroBiasDrift),
+            RandomGaussian(0, gyroBiasDrift),
+            RandomGaussian(0, gyroBiasDrift)
+        );
+    }
+
+    void PublishIMUData(Vector3 acc, Vector3 gyro, Quaternion orientation)
+    {
+        // Create ROS IMU message
+        ImuMsg imuMsg = new ImuMsg();
+        imuMsg.header = new HeaderMsg();
+        imuMsg.header.stamp = new TimeMsg(DateTime.Now);
+        imuMsg.header.frame_id = transform.name + "_imu_frame";
+
+        // Set orientation (if available from other sources, otherwise set to zero)
+        imuMsg.orientation = new QuaternionMsg(
+            orientation.x,
+            orientation.y,
+            orientation.z,
+            orientation.w
+        );
+        imuMsg.orientation_covariance = new double[] { -1, 0, 0, 0, 0, 0, 0, 0, 0 }; // Indicates no orientation data
+
+        // Set angular velocity (convert from degrees to radians if needed)
+        imuMsg.angular_velocity = new Vector3Msg(
+            gyro.x,
+            gyro.y,
+            gyro.z
+        );
+        imuMsg.angular_velocity_covariance = new double[] { 0.001, 0, 0, 0, 0.001, 0, 0, 0, 0.001 };
+
+        // Set linear acceleration (in m/s^2)
+        imuMsg.linear_acceleration = new Vector3Msg(
+            acc.x,
+            acc.y,
+            acc.z
+        );
+        imuMsg.linear_acceleration_covariance = new double[] { 0.017, 0, 0, 0, 0.017, 0, 0, 0, 0.017 };
+
+        // Publish the IMU message
+        ros.Publish(imuTopic, imuMsg);
+    }
+
+    float RandomGaussian(float mean, float stdDev)
+    {
+        // Box-Muller transform implementation
+        float u1 = UnityEngine.Random.value;
+        float u2 = UnityEngine.Random.value;
+        float randStdNormal = Mathf.Sqrt(-2.0f * Mathf.Log(u1)) * Mathf.Sin(2.0f * Mathf.PI * u2);
+        return mean + stdDev * randStdNormal;
+    }
+}
+```
+
+## IMU Data Formats
+
+### ROS IMU Message
+
+The standard ROS format for IMU data:
+
+```python
+# Imu message (sensor_msgs/Imu)
+header: Header
+orientation: geometry_msgs/Quaternion  # Orientation as quaternion
+orientation_covariance: float64[9]    # Covariance matrix for orientation
+angular_velocity: geometry_msgs/Vector3  # Angular velocity in rad/s
+angular_velocity_covariance: float64[9]  # Covariance matrix for angular velocity
+linear_acceleration: geometry_msgs/Vector3  # Linear acceleration in m/s^2
+linear_acceleration_covariance: float64[9]  # Covariance matrix for linear acceleration
+```
+
+### Sensor_msgs/MagneticField
+
+For magnetometer data:
+
+```python
+# MagneticField message (sensor_msgs/MagneticField)
+header: Header
+magnetic_field: geometry_msgs/Vector3  # Magnetic field vector in Tesla
+magnetic_field_covariance: float64[9]  # Covariance matrix for magnetic field
+```
+
+## Noise Modeling for IMUs
+
+### Realistic Noise Models
+
+IMUs exhibit complex noise characteristics that should be simulated:
+
+```csharp
+public class RealisticIMUNoiseModel
+{
+    // Allan Variance model parameters for a typical MEMS IMU
+    private float accWhiteNoise = 0.017f;  // 100ug at 100Hz
+    private float accBiasInstability = 0.003f;  // 20ug over time
+    private float accRateRandomWalk = 0.001f;   // 60ug/sqrt(hr)
+
+    private float gyroWhiteNoise = 0.001f;      // 0.01 deg/s at 100Hz
+    private float gyroBiasInstability = 0.00035f; // 10 deg/hr over time
+    private float gyroRateRandomWalk = 0.0001f;   // 6 deg/sqrt(hr)
+
+    public Vector3 SimulateAccelerometer(Vector3 trueAcc, float deltaTime)
+    {
+        Vector3 noise = Vector3.zero;
+
+        // White noise (high frequency)
+        noise.x += RandomGaussian(0, accWhiteNoise);
+        noise.y += RandomGaussian(0, accWhiteNoise);
+        noise.z += RandomGaussian(0, accWhiteNoise);
+
+        // Bias instability (slow drift)
+        noise.x += RandomGaussian(0, accBiasInstability * Mathf.Sqrt(deltaTime));
+        noise.y += RandomGaussian(0, accBiasInstability * Mathf.Sqrt(deltaTime));
+        noise.z += RandomGaussian(0, accBiasInstability * Mathf.Sqrt(deltaTime));
+
+        // Rate random walk (integration of random walk)
+        noise.x += RandomGaussian(0, accRateRandomWalk * Mathf.Sqrt(deltaTime));
+        noise.y += RandomGaussian(0, accRateRandomWalk * Mathf.Sqrt(deltaTime));
+        noise.z += RandomGaussian(0, accRateRandomWalk * Mathf.Sqrt(deltaTime));
+
+        return trueAcc + noise;
+    }
+
+    public Vector3 SimulateGyroscope(Vector3 trueGyro, float deltaTime)
+    {
+        Vector3 noise = Vector3.zero;
+
+        // White noise (high frequency)
+        noise.x += RandomGaussian(0, gyroWhiteNoise);
+        noise.y += RandomGaussian(0, gyroWhiteNoise);
+        noise.z += RandomGaussian(0, gyroWhiteNoise);
+
+        // Bias instability (slow drift)
+        noise.x += RandomGaussian(0, gyroBiasInstability * Mathf.Sqrt(deltaTime));
+        noise.y += RandomGaussian(0, gyroBiasInstability * Mathf.Sqrt(deltaTime));
+        noise.z += RandomGaussian(0, gyroBiasInstability * Mathf.Sqrt(deltaTime));
+
+        // Rate random walk (integration of random walk)
+        noise.x += RandomGaussian(0, gyroRateRandomWalk * Mathf.Sqrt(deltaTime));
+        noise.y += RandomGaussian(0, gyroRateRandomWalk * Mathf.Sqrt(deltaTime));
+        noise.z += RandomGaussian(0, gyroRateRandomWalk * Mathf.Sqrt(deltaTime));
+
+        return trueGyro + noise;
+    }
+
+    float RandomGaussian(float mean, float stdDev)
+    {
+        float u1 = UnityEngine.Random.value;
+        float u2 = UnityEngine.Random.value;
+        float randStdNormal = Mathf.Sqrt(-2.0f * Mathf.Log(u1)) * Mathf.Sin(2.0f * Mathf.PI * u2);
+        return mean + stdDev * randStdNormal;
+    }
+}
+```
+
+## Integration with State Estimation
+
+### Complementary Filters
+
+IMU data is often fused with other sensors using filtering techniques:
+
+```csharp
+public class IMUComplementaryFilter
+{
+    private float alpha = 0.98f; // Filter parameter
+    private Vector3 lastAccel;
+    private Vector3 estimatedGravity;
+    private Quaternion orientation;
+
+    public Quaternion UpdateWithIMU(Vector3 accel, Vector3 gyro, float deltaTime)
+    {
+        // Estimate gravity from accelerometer
+        Vector3 accelNorm = accel.normalized;
+
+        // Apply complementary filter
+        estimatedGravity = alpha * (estimatedGravity + gyro * deltaTime) +
+                          (1 - alpha) * accelNorm;
+
+        // Convert to orientation (simplified - in practice, use more sophisticated methods)
+        // This is a placeholder for more complex orientation estimation
+        return orientation;
+    }
+}
+```
+
+### Kalman Filters
+
+For more sophisticated fusion:
+
+- **Extended Kalman Filter (EKF)**: Linearizes non-linear IMU models
+- **Unscented Kalman Filter (UKF)**: Better handles non-linearities
+- **Particle Filters**: Non-parametric approach for complex noise models
+
+## Performance Considerations
+
+### Real-time IMU Simulation
+
+For real-time applications:
+
+- **Integration Accuracy**: Use appropriate numerical integration methods
+- **Computational Efficiency**: Optimize noise generation algorithms
+- **Temporal Consistency**: Ensure proper timing relationships
+
+### Memory Management
+
+IMU data is typically processed in real-time, so memory considerations include:
+
+- **Buffer Management**: Efficient storage of historical data
+- **Frequency Requirements**: IMUs typically require high update rates (100Hz+)
+
+## Validation and Testing
+
+### Ground Truth Comparison
+
+Validate IMU simulation by comparing with:
+
+- **Precise Motion Control**: Known motion profiles
+- **Real IMU Data**: Compare with actual IMU readings
+- **Multi-Sensor Fusion**: Cross-validate with other sensors
+
+### Quality Metrics
+
+Evaluate IMU simulation quality using:
+
+- **Allan Variance**: Characterizes different noise sources
+- **Bias Stability**: Long-term stability of measurements
+- **Scale Factor Accuracy**: Proportional measurement accuracy
+- **Cross-Axis Sensitivity**: Crosstalk between axes
+
+## Common Issues and Troubleshooting
+
+### Integration Issues
+- **Drift Accumulation**: Double integration of noisy acceleration
+- **Gyro Bias**: Long-term orientation drift
+- **Gravity Compensation**: Proper removal of gravity from acceleration
+
+### Calibration Issues
+- **Misalignment**: Incorrect sensor axis alignment
+- **Scale Factor Errors**: Inaccurate conversion from raw to physical units
+- **Temperature Effects**: Performance changes with temperature
+
+### Performance Issues
+- **High Update Rates**: IMUs require frequent updates (100Hz+)
+- **Numerical Integration**: Accumulation of integration errors
+- **Noise Generation**: Computationally expensive noise models
+
+## Integration with ROS
+
+### IMU Topics
+
+Standard ROS topics for IMU sensors:
+
+- `/imu/data`: Primary IMU data with orientation, angular velocity, and linear acceleration
+- `/imu/data_raw`: Raw IMU data without orientation
+- `/imu/mag`: Magnetic field data (if magnetometer available)
+- `/imu/temp`: Temperature data (if available)
+
+### TF Integration
+
+IMU data should be properly integrated with the TF system:
+
+```xml
+<!-- In URDF -->
+<link name="imu_link">
+  <inertial>
+    <mass value="0.01" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001" />
+  </inertial>
+</link>
+
+<joint name="base_to_imu" type="fixed">
+  <parent link="base_link" />
+  <child link="imu_link" />
+  <origin xyz="0.0 0.0 0.1" rpy="0 0 0" />
+</joint>
+```
+
+## Best Practices
+
+### Sensor Configuration
+- Match simulation parameters to real sensor specifications
+- Include realistic noise models based on datasheet parameters
+- Validate against real IMU performance
+
+### Data Processing
+- Implement proper coordinate system transformations
+- Apply appropriate filtering to reduce noise
+- Handle bias estimation and correction
+
+### Integration
+- Ensure synchronized timestamps with other sensors
+- Implement proper calibration procedures
+- Test across different motion profiles
+
+## Advanced Topics
+
+### Temperature Modeling
+
+Real IMUs exhibit temperature-dependent behavior:
+
+- **Bias Temperature Coefficients**: Bias changes with temperature
+- **Scale Factor Temperature Coefficients**: Scale factor changes with temperature
+- **Temperature Compensation**: Adjust measurements based on temperature
+
+### Vibration and Shock Modeling
+
+IMUs can be affected by mechanical vibrations:
+
+- **Vibration Rectification**: DC offset from AC vibrations
+- **Shock Response**: Temporary errors from impact
+- **Mounting Effects**: How mounting affects measurements
+
+## Next Steps
+
+In the following section, we'll explore ROS data streams for sensors, which covers how sensor data is published, subscribed, and processed in ROS-based robotics systems.

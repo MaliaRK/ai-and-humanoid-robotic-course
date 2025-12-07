@@ -1,0 +1,127 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <!-- IMU Sensor Configuration -->
+  <xacro:macro name="imu_sensor" params="name parent_link *origin topic update_rate gaussian_noise">
+    <gazebo reference="${parent_link}">
+      <sensor name="${name}" type="imu">
+        <always_on>true</always_on>
+        <update_rate>${update_rate}</update_rate>
+        <visualize>true</visualize>
+        <topic>__default_topic__</topic>
+        <plugin name="${name}_controller" filename="libgazebo_ros_imu.so">
+          <ros>
+            <namespace>/robot_name</namespace>
+            <remapping>imu:=${topic}</remapping>
+          </ros>
+          <initial_orientation_as_reference>false</initial_orientation_as_reference>
+          <body_name>${parent_link}</body_name>
+          <topic_name>${topic}</topic_name>
+          <serviceName>${topic}/service</serviceName>
+          <gaussian_noise>${gaussian_noise}</gaussian_noise>
+          <update_rate>${update_rate}</update_rate>
+        </plugin>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+
+  <!-- More detailed IMU configuration with noise parameters -->
+  <xacro:macro name="detailed_imu_sensor" params="name parent_link *origin topic update_rate accel_noise gyro_noise">
+    <gazebo reference="${parent_link}">
+      <sensor name="${name}" type="imu">
+        <always_on>true</always_on>
+        <update_rate>${update_rate}</update_rate>
+        <visualize>true</visualize>
+
+        <imu>
+          <!-- Accelerometer properties -->
+          <accelerometer>
+            <x>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>${accel_noise}</stddev>
+                <bias_mean>0.1</bias_mean>
+                <bias_stddev>0.001</bias_stddev>
+              </noise>
+            </x>
+            <y>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>${accel_noise}</stddev>
+                <bias_mean>0.1</bias_mean>
+                <bias_stddev>0.001</bias_stddev>
+              </noise>
+            </y>
+            <z>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>${accel_noise}</stddev>
+                <bias_mean>0.1</bias_mean>
+                <bias_stddev>0.001</bias_stddev>
+              </noise>
+            </z>
+          </accelerometer>
+
+          <!-- Gyroscope properties -->
+          <gyroscope>
+            <x>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>${gyro_noise}</stddev>
+                <bias_mean>0.0</bias_mean>
+                <bias_stddev>0.0001</bias_stddev>
+              </noise>
+            </x>
+            <y>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>${gyro_noise}</stddev>
+                <bias_mean>0.0</bias_mean>
+                <bias_stddev>0.0001</bias_stddev>
+              </noise>
+            </y>
+            <z>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>${gyro_noise}</stddev>
+                <bias_mean>0.0</bias_mean>
+                <bias_stddev>0.0001</bias_stddev>
+              </noise>
+            </z>
+          </gyroscope>
+        </imu>
+
+        <plugin name="${name}_controller" filename="libgazebo_ros_imu.so">
+          <ros>
+            <namespace>/robot_name</namespace>
+            <remapping>imu:=${topic}</remapping>
+          </ros>
+          <body_name>${parent_link}</body_name>
+          <topic_name>${topic}</topic_name>
+          <serviceName>${topic}/service</serviceName>
+          <gaussian_noise>0.0</gaussian_noise>
+          <update_rate>${update_rate}</update_rate>
+        </plugin>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+
+  <!-- Example usage of the IMU macros -->
+  <xacro:imu_sensor
+    name="base_imu"
+    parent_link="imu_mount"
+    topic="/imu/data"
+    update_rate="100"
+    gaussian_noise="0.01">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </xacro:imu_sensor>
+
+  <xacro:detailed_imu_sensor
+    name="detailed_imu"
+    parent_link="imu_mount"
+    topic="/imu/data_detailed"
+    update_rate="100"
+    accel_noise="0.017"
+    gyro_noise="0.001">
+    <origin xyz="0.05 0 0" rpy="0 0 0"/>  <!-- Slightly offset from basic IMU -->
+  </xacro:detailed_imu_sensor>
+</robot>

@@ -1,0 +1,1007 @@
+---
+title: "Isaac Sim Navigation Scene Setup"
+description: "Setting up Isaac Sim scenes for humanoid robot navigation with obstacles, humans, and navigation goals"
+sidebar_position: 7
+---
+
+# Isaac Sim Navigation Scene Setup
+
+## Overview
+
+This chapter covers the creation and configuration of Isaac Sim scenes specifically designed for humanoid robot navigation. These scenes include realistic environments with obstacles, human agents, and navigation goals to test and validate navigation algorithms for humanoid robots.
+
+## Scene Architecture
+
+### Core Components
+The navigation scene consists of several key components:
+
+1. **Environment**: Room or outdoor space with appropriate dimensions
+2. **Humanoid Robot**: The navigation agent with proper physical properties
+3. **Static Obstacles**: Fixed obstacles for navigation challenge
+4. **Dynamic Elements**: Moving obstacles or human agents
+5. **Navigation Goals**: Waypoints for navigation testing
+6. **Sensors**: Cameras, IMU, LiDAR for perception
+7. **Lighting**: Proper illumination for visual perception
+
+### Scene Structure
+```
+/World
+├── /Environment
+│   ├── /Room (walls, floor, ceiling)
+│   └── /Obstacles (static and dynamic)
+├── /HumanoidRobot
+│   ├── /Body (physical representation)
+│   ├── /Sensors (cameras, IMU, etc.)
+│   └── /Controllers (navigation interface)
+├── /Humans
+│   ├── /Human0
+│   ├── /Human1
+│   └── ...
+├── /NavigationGoals
+│   ├── /Goal0
+│   ├── /Goal1
+│   └── ...
+└── /Lighting
+    ├── /DomeLight
+    └── /KeyLight
+```
+
+## Creating the Navigation Scene
+
+### Basic Scene Setup
+```python
+# Example: Basic navigation scene setup
+import omni
+from omni.isaac.kit import SimulationApp
+from omni.isaac.core import World
+from omni.isaac.core.utils.stage import add_reference_to_stage
+from omni.isaac.core.utils.prims import create_primitive
+from omni.isaac.core.utils.nucleus import get_assets_root_path
+from pxr import Gf, Sdf, UsdGeom
+import numpy as np
+
+class HumanoidNavigationScene:
+    def __init__(self):
+        # Scene configuration
+        self.room_dimensions = [8.0, 8.0, 3.0]  # width, depth, height in meters
+        self.robot_start_position = [0.0, 0.0, 0.5]  # Start position for humanoid robot
+        self.robot_height = 1.6  # meters
+        self.robot_radius = 0.3  # meters (approximate cylindrical radius)
+
+        # Navigation goals
+        self.navigation_goals = [
+            [2.0, 2.0, 0.0],
+            [-1.5, 3.0, 0.0],
+            [3.0, -2.0, 0.0],
+            [-2.5, -3.0, 0.0]
+        ]
+
+        # Human positions
+        self.human_positions = [
+            [1.5, 2.0, 0.0],
+            [-1.0, -2.0, 0.0],
+            [2.5, 1.0, 0.0],
+            [-2.0, 2.5, 0.0],
+            [0.0, 3.0, 0.0]
+        ]
+
+    def setup_environment(self):
+        """Set up the complete navigation environment"""
+        # Create ground plane
+        self.create_ground_plane()
+
+        # Create room structure
+        self.create_room_structure()
+
+        # Add static obstacles
+        self.add_static_obstacles()
+
+        # Create humanoid robot
+        self.create_humanoid_robot()
+
+        # Add human agents
+        self.add_human_agents()
+
+        # Create navigation goals
+        self.create_navigation_goals()
+
+        # Set up lighting
+        self.setup_lighting()
+
+        # Initialize physics
+        self.initialize_physics()
+
+    def create_ground_plane(self):
+        """Create a ground plane for the scene"""
+        # Create a large ground plane
+        ground_plane = create_primitive(
+            prim_path="/World/ground_plane",
+            primitive_type="Plane",
+            position=np.array([0.0, 0.0, 0.0]),
+            scale=np.array([20.0, 20.0, 1.0]),
+            color=np.array([0.2, 0.2, 0.2])  # Dark gray
+        )
+
+    def create_room_structure(self):
+        """Create room structure with walls and ceiling"""
+        wall_thickness = 0.2
+        wall_height = self.room_dimensions[2]
+
+        # Create walls using cuboids
+        # Left wall
+        left_wall = create_primitive(
+            prim_path="/World/Room/LeftWall",
+            primitive_type="Cube",
+            position=np.array([-self.room_dimensions[0]/2 - wall_thickness/2, 0.0, wall_height/2]),
+            scale=np.array([wall_thickness, self.room_dimensions[1] + 2*wall_thickness, wall_height]),
+            color=np.array([0.5, 0.5, 0.5])  # Gray
+        )
+
+        # Right wall
+        right_wall = create_primitive(
+            prim_path="/World/Room/RightWall",
+            primitive_type="Cube",
+            position=np.array([self.room_dimensions[0]/2 + wall_thickness/2, 0.0, wall_height/2]),
+            scale=np.array([wall_thickness, self.room_dimensions[1] + 2*wall_thickness, wall_height]),
+            color=np.array([0.5, 0.5, 0.5])  # Gray
+        )
+
+        # Front wall
+        front_wall = create_primitive(
+            prim_path="/World/Room/FrontWall",
+            primitive_type="Cube",
+            position=np.array([0.0, -self.room_dimensions[1]/2 - wall_thickness/2, wall_height/2]),
+            scale=np.array([self.room_dimensions[0], wall_thickness, wall_height]),
+            color=np.array([0.5, 0.5, 0.5])  # Gray
+        )
+
+        # Back wall
+        back_wall = create_primitive(
+            prim_path="/World/Room/BackWall",
+            primitive_type="Cube",
+            position=np.array([0.0, self.room_dimensions[1]/2 + wall_thickness/2, wall_height/2]),
+            scale=np.array([self.room_dimensions[0], wall_thickness, wall_height]),
+            color=np.array([0.5, 0.5, 0.5])  # Gray
+        )
+
+        # Ceiling
+        ceiling = create_primitive(
+            prim_path="/World/Room/Ceiling",
+            primitive_type="Cube",
+            position=np.array([0.0, 0.0, wall_height + 0.05]),  # Slightly above to avoid z-fighting
+            scale=np.array([self.room_dimensions[0], self.room_dimensions[1], 0.1]),
+            color=np.array([0.7, 0.7, 0.7])  # Light gray
+        )
+
+    def create_static_obstacles(self):
+        """Add static obstacles to the scene"""
+        # Create various obstacle types for navigation challenge
+
+        # Column obstacle (representing furniture or structural elements)
+        column = create_primitive(
+            prim_path="/World/Obstacles/Column",
+            primitive_type="Cylinder",
+            position=np.array([1.0, 1.0, 0.75]),
+            scale=np.array([0.2, 0.2, 1.5]),
+            color=np.array([0.8, 0.2, 0.2])  # Red
+        )
+
+        # Box obstacle
+        box = create_primitive(
+            prim_path="/World/Obstacles/Box",
+            primitive_type="Cube",
+            position=np.array([-2.0, -1.5, 0.4]),
+            scale=np.array([0.8, 0.6, 0.8]),
+            color=np.array([0.2, 0.2, 0.8])  # Blue
+        )
+
+        # Table obstacle
+        table = create_primitive(
+            prim_path="/World/Obstacles/Table",
+            primitive_type="Cube",
+            position=np.array([2.5, -2.0, 0.5]),
+            scale=np.array([1.2, 0.8, 1.0]),
+            color=np.array([0.6, 0.4, 0.2])  # Brown
+        )
+
+        # Chair obstacle
+        chair = create_primitive(
+            prim_path="/World/Obstacles/Chair",
+            primitive_type="Cube",
+            position=np.array([-1.5, 2.5, 0.3]),
+            scale=np.array([0.4, 0.4, 0.6]),
+            color=np.array([0.3, 0.6, 0.3])  # Green
+        )
+
+    def create_humanoid_robot(self):
+        """Create humanoid robot model in the scene"""
+        # Create robot body (simplified as a humanoid-shaped object)
+        # In practice, you would load a proper humanoid robot USD model
+
+        # Robot torso
+        robot_torso = create_primitive(
+            prim_path="/World/HumanoidRobot/Torso",
+            primitive_type="Capsule",
+            position=np.array(self.robot_start_position),
+            scale=np.array([0.2, 0.15, 0.8]),  # Approximate humanoid torso
+            color=np.array([0.2, 0.2, 0.8])  # Blue to distinguish from humans
+        )
+
+        # Robot head
+        robot_head = create_primitive(
+            prim_path="/World/HumanoidRobot/Head",
+            primitive_type="Sphere",
+            position=np.array([self.robot_start_position[0],
+                              self.robot_start_position[1],
+                              self.robot_start_position[2] + 0.9]),  # Above torso
+            scale=np.array([0.12, 0.12, 0.12]),
+            color=np.array([0.9, 0.9, 0.7])  # Light yellow
+        )
+
+        # Robot limbs (simplified as cylinders)
+        # Left arm
+        left_arm = create_primitive(
+            prim_path="/World/HumanoidRobot/LeftArm",
+            primitive_type="Cylinder",
+            position=np.array([self.robot_start_position[0] - 0.25,
+                              self.robot_start_position[1],
+                              self.robot_start_position[2] + 0.4]),
+            scale=np.array([0.05, 0.3, 0.05]),
+            rotation=np.array([0, 90, 0]),  # Orient horizontally
+            color=np.array([0.2, 0.2, 0.8])
+        )
+
+        # Right arm
+        right_arm = create_primitive(
+            prim_path="/World/HumanoidRobot/RightArm",
+            primitive_type="Cylinder",
+            position=np.array([self.robot_start_position[0] + 0.25,
+                              self.robot_start_position[1],
+                              self.robot_start_position[2] + 0.4]),
+            scale=np.array([0.05, 0.3, 0.05]),
+            rotation=np.array([0, 90, 0]),  # Orient horizontally
+            color=np.array([0.2, 0.2, 0.8])
+        )
+
+        # Left leg
+        left_leg = create_primitive(
+            prim_path="/World/HumanoidRobot/LeftLeg",
+            primitive_type="Cylinder",
+            position=np.array([self.robot_start_position[0] - 0.15,
+                              self.robot_start_position[1],
+                              self.robot_start_position[2] - 0.4]),
+            scale=np.array([0.06, 0.5, 0.06]),
+            rotation=np.array([0, 90, 0]),  # Orient vertically
+            color=np.array([0.2, 0.2, 0.8])
+        )
+
+        # Right leg
+        right_leg = create_primitive(
+            prim_path="/World/HumanoidRobot/RightLeg",
+            primitive_type="Cylinder",
+            position=np.array([self.robot_start_position[0] + 0.15,
+                              self.robot_start_position[1],
+                              self.robot_start_position[2] - 0.4]),
+            scale=np.array([0.06, 0.5, 0.06]),
+            rotation=np.array([0, 90, 0]),  # Orient vertically
+            color=np.array([0.2, 0.2, 0.8])
+        )
+
+    def add_human_agents(self):
+        """Add human agents to the scene for social navigation testing"""
+        for i, pos in enumerate(self.human_positions):
+            # Create human body (torso)
+            human_body = create_primitive(
+                prim_path=f"/World/Humans/Human{i}/Body",
+                primitive_type="Capsule",
+                position=np.array([pos[0], pos[1], 0.9]),  # Human torso height
+                scale=np.array([0.15, 0.12, 0.8]),  # Human torso approximation
+                color=np.array([0.9, 0.6, 0.2])  # Orange for humans
+            )
+
+            # Create human head
+            human_head = create_primitive(
+                prim_path=f"/World/Humans/Human{i}/Head",
+                primitive_type="Sphere",
+                position=np.array([pos[0], pos[1], 1.5]),  # Head height
+                scale=np.array([0.1, 0.1, 0.1]),
+                color=np.array([0.95, 0.9, 0.85])  # Skin tone
+            )
+
+            # Simple arms for human appearance
+            human_l_arm = create_primitive(
+                prim_path=f"/World/Humans/Human{i}/LeftArm",
+                primitive_type="Cylinder",
+                position=np.array([pos[0] - 0.2, pos[1], 0.9]),
+                scale=np.array([0.03, 0.3, 0.03]),
+                rotation=np.array([0, 90, 0]),
+                color=np.array([0.9, 0.6, 0.2])
+            )
+
+            human_r_arm = create_primitive(
+                prim_path=f"/World/Humans/Human{i}/RightArm",
+                primitive_type="Cylinder",
+                position=np.array([pos[0] + 0.2, pos[1], 0.9]),
+                scale=np.array([0.03, 0.3, 0.03]),
+                rotation=np.array([0, 90, 0]),
+                color=np.array([0.9, 0.6, 0.2])
+            )
+
+    def create_navigation_goals(self):
+        """Create navigation goal markers"""
+        for i, goal_pos in enumerate(self.navigation_goals):
+            goal_marker = create_primitive(
+                prim_path=f"/World/NavigationGoals/Goal{i}",
+                primitive_type="Cylinder",
+                position=np.array([goal_pos[0], goal_pos[1], 0.1]),  # Slightly above ground
+                scale=np.array([0.2, 0.2, 0.2]),
+                color=np.array([0.2, 0.8, 0.2])  # Green goal markers
+            )
+
+    def setup_lighting(self):
+        """Set up proper lighting for the scene"""
+        stage = omni.usd.get_context().get_stage()
+
+        # Create dome light for ambient lighting
+        dome_light = UsdLux.DomeLight.Define(stage, Sdf.Path("/World/DomeLight"))
+        dome_light.CreateIntensityAttr(3000)
+        dome_light.CreateColorAttr(Gf.Vec3f(0.9, 0.9, 0.9))
+
+        # Create key light
+        key_light = UsdLux.DistantLight.Define(stage, Sdf.Path("/World/KeyLight"))
+        key_light.CreateIntensityAttr(1500)
+        key_light.CreateColorAttr(Gf.Vec3f(1.0, 0.95, 0.9))
+        # Set rotation to illuminate the scene well
+        xform = UsdGeom.Xformable(key_light)
+        xform.AddRotateXYZOp().Set(Gf.Vec3f(-30, 45, 0))
+
+    def initialize_physics(self):
+        """Initialize physics properties for the scene"""
+        # Get the physics scene
+        scene = UsdPhysics.Scene.Define(stage, Sdf.Path("/physics/scene"))
+
+        # Set gravity
+        scene.CreateGravityDirectionAttr().Set(Gf.Vec3f(0.0, 0.0, -1.0))
+        scene.CreateGravityMagnitudeAttr().Set(9.81)
+
+        # Configure PhysX settings
+        physx_scene_api = PhysxSchema.PhysxSceneAPI.Apply(scene.GetPrim())
+        physx_scene_api.CreateEnableCCDAttr(True)  # Continuous collision detection
+        physx_scene_api.CreateEnableStabilizationAttr(True)
+        physx_scene_api.CreateEnableGPUDynamicsAttr(False)  # Enable if GPU dynamics needed
+
+    def get_scene_summary(self):
+        """Get summary of created scene"""
+        return {
+            "room_dimensions": self.room_dimensions,
+            "robot_count": 1,
+            "human_count": len(self.human_positions),
+            "obstacle_count": 4,  # Column, box, table, chair
+            "navigation_goals": len(self.navigation_goals),
+            "total_entities": 1 + len(self.human_positions) + 4 + len(self.navigation_goals)
+        }
+
+    def print_scene_info(self):
+        """Print information about the created scene"""
+        summary = self.get_scene_summary()
+
+        print("\n" + "="*50)
+        print("HUMANOID NAVIGATION SCENE CREATED")
+        print("="*50)
+        print(f"Room dimensions: {summary['room_dimensions'][0]} x {summary['room_dimensions'][1]} x {summary['room_dimensions'][2]} meters")
+        print(f"Robot: 1 humanoid robot")
+        print(f"Humans: {summary['human_count']} human agents")
+        print(f"Obstacles: {summary['obstacle_count']} static obstacles")
+        print(f"Navigation goals: {summary['navigation_goals']} locations")
+        print(f"Total entities: {summary['total_entities']}")
+        print("="*50 + "\n")
+```
+
+## Advanced Scene Features
+
+### Dynamic Human Agents
+```python
+# Example: Adding dynamic human agents with movement patterns
+class DynamicHumanAgent:
+    def __init__(self, prim_path, start_position, color):
+        self.prim_path = prim_path
+        self.current_position = start_position
+        self.color = color
+        self.movement_pattern = "stationary"  # Options: stationary, patrol, random_walk
+        self.waypoints = []
+        self.current_waypoint_index = 0
+        self.movement_speed = 0.5  # m/s
+
+    def create_in_stage(self):
+        """Create the human agent in the USD stage"""
+        # Create human body (torso)
+        create_primitive(
+            prim_path=f"{self.prim_path}/Body",
+            primitive_type="Capsule",
+            position=np.array(self.current_position),
+            scale=np.array([0.15, 0.12, 0.8]),
+            color=self.color
+        )
+
+        # Create human head
+        create_primitive(
+            prim_path=f"{self.prim_path}/Head",
+            primitive_type="Sphere",
+            position=np.array([self.current_position[0],
+                              self.current_position[1],
+                              self.current_position[2] + 0.8]),
+            scale=np.array([0.1, 0.1, 0.1]),
+            color=np.array([0.95, 0.9, 0.85])
+        )
+
+    def set_patrol_pattern(self, waypoints):
+        """Set a patrol movement pattern"""
+        self.movement_pattern = "patrol"
+        self.waypoints = waypoints
+        self.current_waypoint_index = 0
+
+    def set_random_walk_pattern(self, area_center, area_radius):
+        """Set a random walk movement pattern"""
+        self.movement_pattern = "random_walk"
+        self.area_center = area_center
+        self.area_radius = area_radius
+
+    def update_position(self, dt):
+        """Update human position based on movement pattern"""
+        if self.movement_pattern == "patrol" and self.waypoints:
+            # Move toward current waypoint
+            current_waypoint = self.waypoints[self.current_waypoint_index]
+            direction = np.array(current_waypoint) - np.array(self.current_position)
+            distance = np.linalg.norm(direction)
+
+            if distance < 0.1:  # Reached waypoint
+                self.current_waypoint_index = (self.current_waypoint_index + 1) % len(self.waypoints)
+                current_waypoint = self.waypoints[self.current_waypoint_index]
+                direction = np.array(current_waypoint) - np.array(self.current_position)
+
+            # Move toward waypoint
+            if distance > 0:
+                direction = direction / distance  # Normalize
+                movement = direction * self.movement_speed * dt
+                self.current_position = self.current_position + movement
+
+                # Update USD stage with new position
+                self.update_usd_position()
+
+        elif self.movement_pattern == "random_walk":
+            # Move randomly within area
+            angle = np.random.uniform(0, 2*np.pi)
+            step = np.random.uniform(0, self.movement_speed * dt)
+            dx = step * np.cos(angle)
+            dy = step * np.sin(angle)
+
+            new_x = self.current_position[0] + dx
+            new_y = self.current_position[1] + dy
+
+            # Stay within area bounds
+            dist_from_center = np.sqrt((new_x - self.area_center[0])**2 + (new_y - self.area_center[1])**2)
+            if dist_from_center <= self.area_radius:
+                self.current_position[0] = new_x
+                self.current_position[1] = new_y
+                self.update_usd_position()
+
+    def update_usd_position(self):
+        """Update USD stage with current position"""
+        # This would update the actual USD prims with new positions
+        # In practice, this would involve more complex USD operations
+        pass
+
+
+class EnhancedNavigationScene(HumanoidNavigationScene):
+    """Enhanced scene with dynamic elements and advanced features"""
+
+    def __init__(self):
+        super().__init__()
+        self.dynamic_humans = []
+        self.movable_obstacles = []
+        self.interactive_elements = []
+
+    def add_dynamic_humans(self):
+        """Add humans with movement patterns"""
+        # Create humans with different movement patterns
+        human_configs = [
+            {"start_pos": [1.5, 2.0, 0.0], "color": [0.9, 0.6, 0.2], "pattern": "patrol",
+             "waypoints": [[1.5, 2.0, 0.0], [2.5, 2.0, 0.0], [2.5, 1.0, 0.0], [1.5, 1.0, 0.0]]},
+            {"start_pos": [-1.0, -2.0, 0.0], "color": [0.8, 0.5, 0.3], "pattern": "random_walk",
+             "area_center": [-1.0, -2.0, 0.0], "area_radius": 1.0},
+            {"start_pos": [2.5, 1.0, 0.0], "color": [0.7, 0.4, 0.5], "pattern": "stationary"}
+        ]
+
+        for i, config in enumerate(human_configs):
+            human_agent = DynamicHumanAgent(
+                prim_path=f"/World/DynamicHumans/Human{i}",
+                start_position=config["start_pos"],
+                color=np.array(config["color"])
+            )
+            human_agent.create_in_stage()
+
+            if config["pattern"] == "patrol":
+                human_agent.set_patrol_pattern(config["waypoints"])
+            elif config["pattern"] == "random_walk":
+                human_agent.set_random_walk_pattern(config["area_center"], config["area_radius"])
+
+            self.dynamic_humans.append(human_agent)
+
+    def add_movable_obstacles(self):
+        """Add obstacles that can be moved by the robot"""
+        movable_configs = [
+            {"position": [-2.5, 0.0, 0.2], "size": [0.3, 0.3, 0.4], "color": [0.6, 0.6, 0.6]},
+            {"position": [0.0, -2.5, 0.2], "size": [0.4, 0.2, 0.4], "color": [0.5, 0.7, 0.5]}
+        ]
+
+        for i, config in enumerate(movable_configs):
+            movable_box = create_primitive(
+                prim_path=f"/World/MovableObstacles/Box{i}",
+                primitive_type="Cube",
+                position=np.array(config["position"]),
+                scale=np.array(config["size"]),
+                color=np.array(config["color"])
+            )
+
+            # Make it dynamic (movable by physics)
+            # This would involve setting up physics properties
+
+            self.movable_obstacles.append(movable_box)
+
+    def add_interactive_elements(self):
+        """Add elements that respond to robot interaction"""
+        # Add interactive doors, buttons, etc.
+        interactive_elements = [
+            {"type": "door", "position": [0.0, -4.0, 0.75], "size": [0.1, 2.0, 1.5]},
+            {"type": "button", "position": [1.0, 1.0, 0.8], "size": [0.1, 0.1, 0.1]}
+        ]
+
+        for i, element in enumerate(interactive_elements):
+            if element["type"] == "door":
+                door = create_primitive(
+                    prim_path=f"/World/InteractiveElements/Door{i}",
+                    primitive_type="Cube",
+                    position=np.array(element["position"]),
+                    scale=np.array(element["size"]),
+                    color=np.array([0.8, 0.6, 0.4])  # Wood color
+                )
+            elif element["type"] == "button":
+                button = create_primitive(
+                    prim_path=f"/World/InteractiveElements/Button{i}",
+                    primitive_type="Sphere",
+                    position=np.array(element["position"]),
+                    scale=np.array(element["size"]),
+                    color=np.array([0.9, 0.2, 0.2])  # Red button
+                )
+
+            self.interactive_elements.append(element)
+
+    def update_dynamic_elements(self, dt):
+        """Update all dynamic elements in the scene"""
+        # Update dynamic humans
+        for human in self.dynamic_humans:
+            human.update_position(dt)
+
+        # In a real implementation, this would also update:
+        # - Movable obstacles affected by robot
+        # - Interactive elements responding to robot actions
+        # - Any other dynamic scene elements
+```
+
+## Scene Configuration Files
+
+### Scene Configuration Parameters
+```yaml
+# navigation_scene_config.yaml
+scene:
+  room:
+    dimensions: [8.0, 8.0, 3.0]  # width, depth, height (meters)
+    floor_material: "omniverse://localhost/NVIDIA/Assets/Skies/Indoor/Corridor_Floor_Clean.usd"
+    wall_material: "omniverse://localhost/NVIDIA/Assets/Skies/Indoor/Corridor_Walls_Painted.usd"
+    ceiling_material: "omniverse://localhost/NVIDIA/Assets/Skies/Indoor/Corridor_Ceiling_Tiles.usd"
+
+  humanoid_robot:
+    model_path: "omniverse://localhost/NVIDIA/Assets/Isaac/Robots/Humanoid/humanoid_instanceable.usd"
+    start_position: [0.0, 0.0, 0.5]
+    height: 1.6  # meters
+    radius: 0.3  # meters (cylindrical approximation)
+    sensor_config:
+      camera:
+        fov: 90  # degrees
+        resolution: [640, 480]
+        position: [0.0, 0.0, 1.5]  # Eye level
+      imu:
+        position: [0.0, 0.0, 0.8]  # Torso level
+      lidar:
+        position: [0.0, 0.0, 1.0]
+        range: 10.0
+        resolution: 0.25  # degrees
+
+  static_obstacles:
+    - name: "column"
+      type: "cylinder"
+      position: [1.0, 1.0, 0.75]
+      scale: [0.2, 0.2, 1.5]
+      color: [0.8, 0.2, 0.2]
+    - name: "box"
+      type: "cube"
+      position: [-2.0, -1.5, 0.4]
+      scale: [0.8, 0.6, 0.8]
+      color: [0.2, 0.2, 0.8]
+    - name: "table"
+      type: "cube"
+      position: [2.5, -2.0, 0.5]
+      scale: [1.2, 0.8, 1.0]
+      color: [0.6, 0.4, 0.2]
+    - name: "chair"
+      type: "cube"
+      position: [-1.5, 2.5, 0.3]
+      scale: [0.4, 0.4, 0.6]
+      color: [0.3, 0.6, 0.3]
+
+  humans:
+    count: 5
+    positions:
+      - [1.5, 2.0, 0.0]
+      - [-1.0, -2.0, 0.0]
+      - [2.5, 1.0, 0.0]
+      - [-2.0, 2.5, 0.0]
+      - [0.0, 3.0, 0.0]
+    colors:
+      - [0.9, 0.6, 0.2]  # Orange
+      - [0.8, 0.5, 0.3]  # Brown-orange
+      - [0.7, 0.4, 0.5]  # Purple
+      - [0.6, 0.7, 0.4]  # Olive
+      - [0.5, 0.5, 0.8]  # Blue-purple
+    movement_patterns:
+      - type: "patrol"
+        waypoints: [[1.5, 2.0, 0.0], [2.5, 2.0, 0.0], [2.5, 1.0, 0.0], [1.5, 1.0, 0.0]]
+        speed: 0.4
+      - type: "random_walk"
+        center: [-1.0, -2.0, 0.0]
+        radius: 1.0
+        speed: 0.3
+      - type: "stationary"
+      - type: "patrol"
+        waypoints: [[-2.0, 2.5, 0.0], [-2.0, 1.5, 0.0], [-1.0, 1.5, 0.0], [-1.0, 2.5, 0.0]]
+        speed: 0.5
+      - type: "stationary"
+
+  navigation_goals:
+    - [2.0, 2.0, 0.0]
+    - [-1.5, 3.0, 0.0]
+    - [3.0, -2.0, 0.0]
+    - [-2.5, -3.0, 0.0]
+
+  lighting:
+    dome_intensity: 3000
+    dome_color: [0.9, 0.9, 0.9]
+    key_intensity: 1500
+    key_color: [1.0, 0.95, 0.9]
+    key_rotation: [-30, 45, 0]
+
+  physics:
+    gravity: [0.0, 0.0, -9.81]
+    enable_ccd: true
+    enable_stabilization: true
+    enable_gpu_dynamics: false
+
+  simulation:
+    timestep: 0.008333  # 120 Hz
+    enable_wind: false
+    wind_direction: [0.0, 0.0, 0.0]
+    wind_force: 0.0
+```
+
+## Scene Loading Script
+
+### Python Script for Scene Loading
+```python
+#!/usr/bin/env python3
+"""
+Script to load navigation scene configuration and create Isaac Sim scene
+"""
+
+import argparse
+import yaml
+import json
+import numpy as np
+from pathlib import Path
+
+def load_scene_configuration(config_path):
+    """Load scene configuration from YAML file"""
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    return config
+
+def create_scene_from_config(config):
+    """Create Isaac Sim scene from configuration"""
+    # This would interface with Isaac Sim API to create the scene
+    # based on the configuration parameters
+
+    print("Creating scene from configuration...")
+    print(f"Room dimensions: {config['scene']['room']['dimensions']}")
+    print(f"Robot model: {config['scene']['humanoid_robot']['model_path']}")
+    print(f"Number of humans: {config['scene']['humans']['count']}")
+    print(f"Number of static obstacles: {len(config['scene']['static_obstacles'])}")
+    print(f"Number of navigation goals: {len(config['scene']['navigation_goals'])}")
+
+    # In practice, this would call Isaac Sim API functions to create the scene
+    # based on the configuration parameters
+
+    return "Scene created successfully"
+
+def main():
+    parser = argparse.ArgumentParser(description="Load navigation scene configuration")
+    parser.add_argument("--config", "-c", type=str,
+                       default="navigation_scene_config.yaml",
+                       help="Path to scene configuration file")
+    parser.add_argument("--headless", "-hl", action="store_true",
+                       help="Run in headless mode")
+
+    args = parser.parse_args()
+
+    # Check if config file exists
+    config_path = Path(args.config)
+    if not config_path.exists():
+        print(f"Configuration file {config_path} not found!")
+        return 1
+
+    # Load configuration
+    config = load_scene_configuration(config_path)
+
+    # Create scene from configuration
+    result = create_scene_from_config(config)
+    print(result)
+
+    print(f"Scene loaded successfully from {config_path}")
+
+if __name__ == "__main__":
+    main()
+```
+
+## Testing Navigation Scenarios
+
+### Navigation Test Scenarios
+```python
+# Example: Navigation test scenarios for humanoid robot
+class NavigationTestScenarios:
+    """Test scenarios for humanoid robot navigation in Isaac Sim"""
+
+    def __init__(self):
+        self.scenarios = {
+            "basic_navigation": self.test_basic_navigation,
+            "obstacle_avoidance": self.test_obstacle_avoidance,
+            "social_navigation": self.test_social_navigation,
+            "dynamic_obstacle_avoidance": self.test_dynamic_obstacle_avoidance,
+            "narrow_passage": self.test_narrow_passage_navigation,
+            "multi_goal_navigation": self.test_multi_goal_navigation
+        }
+
+    def test_basic_navigation(self, robot, goals):
+        """Test basic navigation to multiple goals"""
+        print("Testing basic navigation...")
+
+        results = []
+        for i, goal in enumerate(goals):
+            print(f"Navigating to goal {i+1}: {goal}")
+
+            # Send navigation goal
+            robot.navigate_to_pose(goal)
+
+            # Wait for completion
+            success, time_taken = robot.wait_for_navigation_completion(timeout=60.0)
+
+            results.append({
+                "goal": goal,
+                "success": success,
+                "time": time_taken,
+                "path_length": robot.get_traveled_distance()
+            })
+
+            print(f"Goal {i+1} result: Success={success}, Time={time_taken:.2f}s")
+
+        return results
+
+    def test_obstacle_avoidance(self, robot, obstacle_positions):
+        """Test obstacle avoidance capabilities"""
+        print("Testing obstacle avoidance...")
+
+        # Set up navigation with obstacles
+        robot.set_costmap_obstacles(obstacle_positions)
+
+        # Navigate through obstacle course
+        goal = [3.0, 3.0, 0.0]
+        robot.navigate_to_pose(goal)
+
+        # Monitor for safe navigation
+        success, time_taken = robot.wait_for_navigation_completion(timeout=120.0)
+
+        # Check for collisions
+        collisions = robot.get_collision_count()
+
+        result = {
+            "success": success,
+            "time": time_taken,
+            "collisions": collisions,
+            "obstacle_positions": obstacle_positions
+        }
+
+        print(f"Obstacle avoidance test: Success={success}, Collisions={collisions}")
+        return result
+
+    def test_social_navigation(self, robot, human_agents):
+        """Test navigation with human agents"""
+        print("Testing social navigation...")
+
+        # Start human agents moving
+        for human in human_agents:
+            human.start_movement()
+
+        # Navigate while humans are moving
+        goals = [[2.0, 2.0, 0.0], [-1.0, 3.0, 0.0], [3.0, -2.0, 0.0]]
+
+        results = []
+        for goal in goals:
+            robot.navigate_to_pose(goal)
+            success, time_taken = robot.wait_for_navigation_completion(timeout=60.0)
+
+            # Check for social navigation compliance
+            personal_space_violations = robot.get_personal_space_violations()
+
+            results.append({
+                "goal": goal,
+                "success": success,
+                "time": time_taken,
+                "personal_space_violations": personal_space_violations
+            })
+
+        # Stop human agents
+        for human in human_agents:
+            human.stop_movement()
+
+        print(f"Social navigation test completed")
+        return results
+
+    def test_dynamic_obstacle_avoidance(self, robot, dynamic_obstacles):
+        """Test navigation with moving obstacles"""
+        print("Testing dynamic obstacle avoidance...")
+
+        # Start dynamic obstacles moving
+        for obstacle in dynamic_obstacles:
+            obstacle.start_movement()
+
+        # Navigate through dynamic environment
+        goal = [2.5, 2.5, 0.0]
+        robot.navigate_to_pose(goal)
+
+        success, time_taken = robot.wait_for_navigation_completion(timeout=90.0)
+
+        # Check for collisions and successful avoidance
+        collisions = robot.get_collision_count()
+        path_efficiency = robot.get_path_efficiency()
+
+        result = {
+            "success": success,
+            "time": time_taken,
+            "collisions": collisions,
+            "path_efficiency": path_efficiency,
+            "dynamic_obstacles": len(dynamic_obstacles)
+        }
+
+        # Stop dynamic obstacles
+        for obstacle in dynamic_obstacles:
+            obstacle.stop_movement()
+
+        print(f"Dynamic obstacle test: Success={success}, Collisions={collisions}")
+        return result
+
+    def run_all_tests(self, robot, scene_elements):
+        """Run all navigation tests"""
+        print("Running all navigation tests...")
+
+        results = {}
+
+        # Run each test scenario
+        for scenario_name, test_func in self.scenarios.items():
+            print(f"\n--- Running {scenario_name} ---")
+            try:
+                result = test_func(robot, scene_elements.get(scenario_name.replace("_", " "), []))
+                results[scenario_name] = result
+            except Exception as e:
+                print(f"Error in {scenario_name}: {e}")
+                results[scenario_name] = {"error": str(e)}
+
+        # Print summary
+        print("\n" + "="*50)
+        print("NAVIGATION TEST SUMMARY")
+        print("="*50)
+        for scenario, result in results.items():
+            if isinstance(result, dict) and "error" not in result:
+                success = result.get("success", False)
+                print(f"{scenario}: {'✓ PASS' if success else '✗ FAIL'}")
+            else:
+                print(f"{scenario}: ERROR - {result.get('error', 'Unknown error')}")
+
+        return results
+```
+
+## Isaac Sim Scene Launch
+
+### Launch Script for Navigation Scene
+```python
+#!/usr/bin/env python3
+"""
+Launch script for humanoid navigation scene in Isaac Sim
+"""
+
+import sys
+import os
+sys.path.append(os.path.join(os.environ['ISAACSIM_PATH'], 'apps', 'omni.isaac.sim.python.kit'))
+
+from omni.isaac.kit import SimulationApp
+import omni
+import carb
+import argparse
+
+CONFIG = {
+    "experience": f"{os.environ['ISAACSIM_PATH']}/apps/sim_app/configs/default.isaac.sim.json",
+    "headless": False,
+    "window_width": 1280,
+    "window_height": 720
+}
+
+def main():
+    parser = argparse.ArgumentParser(description="Launch humanoid navigation scene")
+    parser.add_argument("--headless", action="store_true", help="Run in headless mode")
+    parser.add_argument("--config", type=str, default="navigation_scene_config.yaml",
+                       help="Scene configuration file")
+    parser.add_argument("--scene", type=str, default="basic",
+                       help="Scene type to load")
+
+    args = parser.parse_args()
+
+    # Update config based on arguments
+    CONFIG["headless"] = args.headless
+
+    # Start simulation application
+    simulation_app = SimulationApp(CONFIG)
+
+    # Import after SimulationApp is created
+    from omni.isaac.core import World
+    import omni.isaac.core.utils.stage as stage_utils
+    import omni.isaac.core.utils.prims as prim_utils
+
+    # Create world
+    world = World(stage_units_in_meters=1.0)
+
+    # Load scene based on type
+    if args.scene == "basic":
+        from navigation_scene_basic import create_basic_navigation_scene
+        create_basic_navigation_scene(world)
+    elif args.scene == "complex":
+        from navigation_scene_complex import create_complex_navigation_scene
+        create_complex_navigation_scene(world)
+    elif args.scene == "social":
+        from navigation_scene_social import create_social_navigation_scene
+        create_social_navigation_scene(world)
+    else:
+        from navigation_scene_basic import create_basic_navigation_scene
+        create_basic_navigation_scene(world)
+
+    # Play the world
+    world.play()
+
+    # Run simulation
+    while simulation_app.is_running():
+        world.step(render=True)
+
+        # Add any custom simulation logic here
+        # For example, updating dynamic elements, processing sensor data, etc.
+
+    # Cleanup
+    world.stop()
+    simulation_app.close()
+
+if __name__ == "__main__":
+    main()

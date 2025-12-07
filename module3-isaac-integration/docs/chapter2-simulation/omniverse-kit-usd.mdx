@@ -1,0 +1,229 @@
+---
+title: "Omniverse Kit & USD Integration"
+description: "Understanding Universal Scene Description and Omniverse Kit for humanoid robotics simulation"
+sidebar_position: 2
+---
+
+# Omniverse Kit & USD Integration
+
+## Introduction
+
+Universal Scene Description (USD) and Omniverse Kit form the foundation of Isaac Sim's scene representation and extensibility. USD provides a powerful, scalable format for describing 3D scenes, while Omniverse Kit provides the framework for building custom simulation applications.
+
+## Universal Scene Description (USD)
+
+### Overview
+USD is Pixar's scene description format that enables:
+- Scalable scene representation
+- Layer-based composition
+- Variant selection for different configurations
+- Extensible schema system
+
+### USD Structure
+- **Prims**: Basic scene objects (geometry, lights, cameras)
+- **Properties**: Attributes of prims (position, rotation, materials)
+- **Relationships**: Connections between prims
+- **Variants**: Alternative configurations of scene elements
+
+### USD in Robotics
+- Robot model definition (URDF-like but more powerful)
+- Environment description
+- Sensor placement and configuration
+- Animation and motion capture data
+
+## Omniverse Kit Architecture
+
+### Core Components
+- **Carb**: Core services and utilities
+- **Omni**: Extensions and applications
+- **USD**: Scene representation layer
+- **Physics**: Physics simulation interface
+- **Renderer**: Rendering pipeline
+
+### Extension System
+- Modular architecture for adding functionality
+- Python and C++ extension support
+- Hot-reload for rapid development
+- Versioned extension management
+
+## Creating Custom Extensions
+
+### Extension Structure
+```
+my_extension/
+├── config/
+│   └── extension.toml
+├── data/
+├── docs/
+├── python/
+│   ├── __init__.py
+│   └── scripts/
+└── tests/
+```
+
+### Extension Configuration (extension.toml)
+```toml
+[package]
+name = "omni.isaac.my_extension"
+title = "My Isaac Extension"
+version = "1.0.0"
+category = "Isaac"
+description = "Custom extension for humanoid robotics"
+author = "Developer"
+repository = ""
+keywords = ["isaac", "robotics", "humanoid"]
+
+[dependencies]
+"omni.isaac.core" = {}
+"omni.kit.ui_app" = {}
+
+[settings]
+```
+
+## USD Schema for Robotics
+
+### Robot Schema
+```python
+# Example: Custom robot schema
+from pxr import Usd, UsdGeom, UsdSkel
+from omni.isaac.core.prims import XFormPrim
+
+class HumanoidRobot:
+    def __init__(self, prim_path):
+        self.prim_path = prim_path
+        self.joints = {}
+        self.links = {}
+
+    def create_robot(self, stage):
+        """Create a humanoid robot in the USD stage"""
+        # Create root transform
+        robot_prim = UsdGeom.Xform.Define(stage, self.prim_path)
+
+        # Create skeleton
+        skeleton = UsdSkel.Skeleton.Define(stage, f"{self.prim_path}/Skeleton")
+
+        # Define joint names and rest transforms
+        joint_names = ["pelvis", "left_hip", "right_hip", "left_knee",
+                      "right_knee", "left_ankle", "right_ankle", "torso",
+                      "left_shoulder", "right_shoulder", "left_elbow",
+                      "right_elbow", "left_wrist", "right_wrist"]
+
+        skeleton.CreateJointsAttr().Set(joint_names)
+
+        # Create joint prims
+        for joint_name in joint_names:
+            joint_path = f"{self.prim_path}/{joint_name}"
+            joint_prim = UsdGeom.Xform.Define(stage, joint_path)
+            self.joints[joint_name] = joint_prim
+
+    def setup_physics(self):
+        """Setup physics properties for the robot"""
+        # Configure mass, inertia, collision properties
+        pass
+```
+
+## Isaac Sim Extensions for Robotics
+
+### Scene Creation Extensions
+- `omni.isaac.ros_bridge`: ROS 2 integration
+- `omni.isaac.sensor`: Sensor simulation
+- `omni.isaac.range_sensor`: Range sensor simulation
+- `omni.isaac.motion_generation`: Motion planning
+
+### Custom Extension Example
+```python
+# Example: Custom humanoid control extension
+import omni
+from omni.isaac.core import World
+from omni.isaac.core.utils.stage import add_reference_to_stage
+from omni.kit.menu.utils import MenuItemDescription, add_menu_items, remove_menu_items
+from omni.kit.window.menu import get_menu_window
+import carb
+
+class HumanoidControlExtension(omni.ext.Extension):
+    def on_startup(self, ext_id):
+        self._ext_id = ext_id
+        self._menu_items = [
+            MenuItemDescription(
+                name="Humanoid Control/Load Humanoid",
+                onclick_fn=self._load_humanoid_robot
+            ),
+            MenuItemDescription(
+                name="Humanoid Control/Run Simulation",
+                onclick_fn=self._run_simulation
+            )
+        ]
+        add_menu_items(self._menu_items, "Isaac Examples")
+
+    def on_shutdown(self):
+        remove_menu_items(self._menu_items, "Isaac Examples")
+        self._menu_items = None
+
+    def _load_humanoid_robot(self):
+        """Load a humanoid robot into the scene"""
+        world = World()
+        add_reference_to_stage(
+            usd_path="path/to/humanoid.usd",
+            prim_path="/World/Humanoid"
+        )
+        carb.log_info("Humanoid robot loaded")
+
+    def _run_simulation(self):
+        """Run the simulation with humanoid control"""
+        world = World()
+        world.reset()
+        # Add simulation logic here
+        carb.log_info("Simulation started")
+```
+
+## USD Composition and Variants
+
+### Layer Composition
+- Root layer contains main scene
+- Reference layers for robot models
+- Overlay layers for specific configurations
+- Variant sets for different robot states
+
+### Example Variant Usage
+```python
+# Create a robot with different configurations
+stage = omni.usd.get_context().get_stage()
+
+# Define variant sets for different robot configurations
+robot_prim = stage.GetPrimAtPath("/World/Humanoid")
+variants = robot_prim.GetVariantSets().GetVariantSet("RobotConfig")
+
+# Add variants
+variants.AddVariant("walking_gait")
+variants.AddVariant("standing_pose")
+variants.AddVariant("crouching_pose")
+
+# Set active variant
+variants.SetCurrentVariant("walking_gait")
+```
+
+## Best Practices
+
+### USD Optimization
+- Use instancing for repeated objects
+- Implement level-of-detail (LOD) systems
+- Use references instead of copies
+- Optimize geometry complexity
+
+### Extension Development
+- Follow Omniverse extension guidelines
+- Use proper logging and error handling
+- Implement proper resource cleanup
+- Test with different scene complexities
+
+## Integration with Isaac ROS
+
+### USD to ROS Mapping
+- Joint state publishing from USD transforms
+- Sensor data publishing in ROS formats
+- TF tree generation from USD hierarchy
+- URDF generation from USD robot models
+
+## Summary
+
+Omniverse Kit and USD provide a powerful foundation for humanoid robotics simulation. USD's scalable scene representation combined with Omniverse Kit's extensibility enables the creation of complex, realistic simulation environments. Understanding these technologies is essential for customizing Isaac Sim for specific humanoid robotics applications.

@@ -1,0 +1,211 @@
+# Isaac Sim Scene Configuration for Humanoid Navigation
+
+# Scene Definition
+scene:
+  name: "humanoid_navigation_world"
+  usd_path: "omniverse://localhost/Projects/Isaac/4.0.0/Isaac/Environments/GroundPlane.usd"
+  gravity: [0, 0, -9.81]
+  time_step: 0.008333  # 120 Hz
+  enable_wind: false
+
+# Robot Configuration
+robot:
+  type: "humanoid"
+  usd_path: "omniverse://localhost/NVIDIA/Assets/Isaac/Robots/Humanoid/humanoid_instanceable.usd"
+  position: [0.0, 0.0, 0.7]
+  orientation: [0.0, 0.0, 0.0, 1.0]  # quaternion [x, y, z, w]
+  sensors:
+    camera:
+      name: "head_camera"
+      position: [0.0, 0.0, 1.5]  # Eye-level for humanoid
+      orientation: [0.0, 0.0, 0.0, 1.0]
+      fov: 90
+      resolution: [640, 480]
+      frequency: 30.0
+    imu:
+      name: "torso_imu"
+      position: [0.0, 0.0, 0.8]  # Torso level
+      frequency: 100.0
+    lidar:
+      name: "navigation_lidar"
+      position: [0.0, 0.0, 1.0]  # Chest level
+      frequency: 10.0
+      range: 10.0
+      horizontal_resolution: 0.25
+      vertical_resolution: 2.0
+      vertical_fov: 30.0
+
+# Environment Configuration
+environment:
+  obstacles:
+    - name: "column"
+      type: "cylinder"
+      position: [1.0, 1.0, 0.75]
+      scale: [0.2, 0.2, 1.5]
+      color: [0.8, 0.2, 0.2]
+    - name: "box"
+      type: "cube"
+      position: [-2.0, -1.5, 0.4]
+      scale: [0.8, 0.6, 0.8]
+      color: [0.2, 0.2, 0.8]
+    - name: "table"
+      type: "cube"
+      position: [2.5, -2.0, 0.5]
+      scale: [1.2, 0.8, 1.0]
+      color: [0.6, 0.4, 0.2]
+    - name: "chair"
+      type: "cube"
+      position: [-1.5, 2.5, 0.3]
+      scale: [0.4, 0.4, 0.6]
+      color: [0.3, 0.6, 0.3]
+
+  humans:
+    - name: "human_0"
+      position: [1.5, 2.0, 0.0]
+      color: [0.9, 0.6, 0.2]
+      movement_pattern: "stationary"
+    - name: "human_1"
+      position: [-1.0, -2.0, 0.0]
+      color: [0.8, 0.5, 0.3]
+      movement_pattern: "patrol"
+      waypoints: [[-1.0, -2.0, 0.0], [-1.0, -1.0, 0.0], [0.0, -1.0, 0.0], [0.0, -2.0, 0.0]]
+    - name: "human_2"
+      position: [2.5, 1.0, 0.0]
+      color: [0.7, 0.4, 0.5]
+      movement_pattern: "random_walk"
+      area_center: [2.5, 1.0, 0.0]
+      area_radius: 1.0
+    - name: "human_3"
+      position: [-2.0, 2.5, 0.0]
+      color: [0.6, 0.7, 0.4]
+      movement_pattern: "patrol"
+      waypoints: [[-2.0, 2.5, 0.0], [-2.0, 1.5, 0.0], [-1.0, 1.5, 0.0], [-1.0, 2.5, 0.0]]
+    - name: "human_4"
+      position: [0.0, 3.0, 0.0]
+      color: [0.5, 0.5, 0.8]
+      movement_pattern: "stationary"
+
+  navigation_goals:
+    - [2.0, 2.0, 0.0]
+    - [-1.5, 3.0, 0.0]
+    - [3.0, -2.0, 0.0]
+    - [-2.5, -3.0, 0.0]
+
+# Isaac ROS Extensions Configuration
+extensions:
+  visual_slam:
+    enable: true
+    input_camera: "head_camera"
+    publish_map: true
+    publish_pose_graph: true
+    map_frame: "vslam_map"
+    pose_frame: "vslam_odom"
+    min_num_features: 1000
+    max_num_features: 2000
+    feature_quality_level: 0.01
+    enable_localization: true
+    enable_mapping: true
+
+  apriltag:
+    enable: true
+    input_camera: "head_camera"
+    family: "36h11"
+    max_tags: 10
+    publish_detections: true
+
+  pointcloud:
+    enable: true
+    input_lidar: "navigation_lidar"
+    publish_pointcloud: true
+    pointcloud_frame: "lidar_pointcloud"
+
+# Physics Configuration
+physics:
+  gravity: [0, 0, -9.81]
+  enable_ccd: true
+  enable_stabilization: true
+  solver_type: "TGS"
+  position_iteration_count: 4
+  velocity_iteration_count: 1
+  gpu_max_particles: 100000
+  gpu_max_projections: 100000
+  gpu_max_pairs: 100000
+  gpu_max_contacts: 100000
+
+# Rendering Configuration
+rendering:
+  enable_hydra_rendering: true
+  enable_pathtracing: false
+  render_mode: "Hydra"
+  resolution:
+    width: 1280
+    height: 720
+  antialiasing: 2
+  max_surface_bounces: 8
+  max_volume_bounces: 4
+  enable_dof: false
+  enable_motion_blur: false
+
+# Simulation Configuration
+simulation:
+  enable_cameras: true
+  enable_lidar: true
+  enable_imu: true
+  enable_contact_sensors: true
+  contact_report_threshold: 1.0
+  enable_gpu_physics: true
+  gpu_max_rigids: 1000
+  gpu_max_softs: 1000
+  gpu_max_fluids: 1000
+
+# ROS Bridge Configuration
+ros_bridge:
+  enable: true
+  namespace: ""
+  clock_publish_frequency: 60.0
+  publish_robot_description: true
+  publish_tf: true
+  tf_publish_frequency: 50.0
+  camera_enable: true
+  lidar_enable: true
+  imu_enable: true
+  joint_state_enable: true
+  enable_ros2: true
+  ros2_context: "isaac_sim"
+  ros2_qos:
+    sensor_data:
+      reliability: "best_effort"
+      durability: "volatile"
+      history: "keep_last"
+      depth: 10
+    default:
+      reliability: "reliable"
+      durability: "transient_local"
+      history: "keep_last"
+      depth: 10
+
+# Performance Configuration
+performance:
+  enable_gpu_compute: true
+  enable_gpu_particles: true
+  enable_gpu_raycasting: true
+  max_gpu_allocated_bytes: 4294967296  # 4GB
+  max_cpu_allocated_bytes: 2147483648  # 2GB
+  enable_profiler: false
+  profiler_frequency: 1.0
+  enable_statistics: true
+  statistics_frequency: 1.0
+
+# Debug Configuration
+debug:
+  enable_debug_draw: false
+  enable_physics_debug: false
+  enable_rendering_debug: false
+  enable_sensor_debug: false
+  debug_draw_flags:
+    - "draw_axis"
+    - "draw_body_axes"
+    - "draw_joint_axes"
+    - "draw_joint_frames"
+    - "draw_contact_points"
+    - "draw_contact_normals"

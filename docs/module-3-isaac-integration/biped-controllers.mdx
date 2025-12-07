@@ -1,0 +1,912 @@
+---
+title: "Biped Controllers for Humanoid Robots"
+description: "Specialized controllers designed for bipedal locomotion and navigation of humanoid robots"
+sidebar_position: 4
+---
+
+# Biped Controllers for Humanoid Robots
+
+## Introduction
+
+Biped controllers are specialized control systems designed to manage the complex dynamics of bipedal locomotion in humanoid robots. Unlike wheeled robots, humanoid robots must maintain balance while walking, which requires sophisticated control strategies that account for the robot's center of mass, joint coordination, and dynamic stability during various gait patterns and navigation scenarios.
+
+## Biped Locomotion Fundamentals
+
+### Center of Mass (CoM) Dynamics
+- **CoM Trajectory**: The path of the robot's center of mass during locomotion
+- **Zero Moment Point (ZMP)**: Point where the net moment of ground reaction forces equals zero
+- **Capture Point**: Location where the robot can come to rest with its current momentum
+- **Support Polygon**: Area bounded by the feet contact points for stability
+
+### Gait Patterns
+- **Double Support Phase**: Both feet in contact with ground
+- **Single Support Phase**: One foot in contact, one swinging
+- **Stance Phase**: Supporting foot is stationary
+- **Swing Phase**: Non-supporting foot moves forward
+
+### Balance Control Principles
+- **Static Balance**: CoM remains within support polygon
+- **Dynamic Balance**: Momentarily unstable but recoverable through motion
+- **Passive Dynamic Walking**: Energy-efficient walking using gravity
+- **Active Control**: Continuous adjustment for stability
+
+## Biped Control Architecture
+
+### Hierarchical Control Structure
+```
+High-Level Planner
+├── Gait Generator
+├── Footstep Planner
+└── Swing Leg Trajectory Generator
+
+Mid-Level Controller
+├── Balance Controller
+├── Joint Trajectory Generator
+└── Gait Scheduler
+
+Low-Level Controller
+├── Joint Position Controllers
+├── Torque Controllers
+└── Force/Torque Control
+```
+
+### Control Loop Structure
+```python
+# Example: Biped control architecture
+import numpy as np
+from geometry_msgs.msg import Twist, Pose
+from std_msgs.msg import Float64MultiArray
+from sensor_msgs.msg import JointState, Imu
+import rospy
+
+class BipedController:
+    def __init__(self):
+        # Robot configuration
+        self.mass = 30.0  # kg
+        self.gravity = 9.81  # m/s^2
+        self.leg_length = 0.8  # m
+        self.com_height = 0.7  # m
+
+        # Control parameters
+        self.control_frequency = 200.0  # Hz
+        self.gait_frequency = 2.0      # Hz
+        self.balance_kp = 100.0        # Proportional gain for balance
+        self.balance_kd = 20.0         # Derivative gain for balance
+
+        # State variables
+        self.com_position = np.zeros(3)  # Center of mass position
+        self.com_velocity = np.zeros(3)  # Center of mass velocity
+        self.foot_positions = {'left': np.zeros(3), 'right': np.zeros(3)}
+        self.support_foot = 'left'
+        self.gait_phase = 0.0
+
+        # Initialize controllers
+        self.balance_controller = BalanceController()
+        self.footstep_controller = FootstepController()
+        self.swing_leg_controller = SwingLegController()
+
+        # Publishers and subscribers
+        self.joint_cmd_pub = rospy.Publisher('/joint_commands', Float64MultiArray, queue_size=10)
+        self.joint_state_sub = rospy.Subscriber('/joint_states', JointState, self.joint_state_callback)
+        self.imu_sub = rospy.Subscriber('/imu/data', Imu, self.imu_callback)
+
+        # Control timer
+        self.control_timer = rospy.Timer(rospy.Duration(1.0/self.control_frequency), self.control_loop)
+
+    def control_loop(self, event):
+        """Main control loop"""
+        # Update robot state from sensors
+        self.update_robot_state()
+
+        # Calculate balance control commands
+        balance_cmds = self.balance_controller.compute_commands(
+            self.com_position, self.com_velocity, self.foot_positions
+        )
+
+        # Calculate footstep control commands
+        footstep_cmds = self.footstep_controller.compute_commands(
+            self.support_foot, self.gait_phase
+        )
+
+        # Calculate swing leg control commands
+        swing_cmds = self.swing_leg_controller.compute_commands(
+            self.support_foot, self.foot_positions
+        )
+
+        # Combine commands
+        combined_cmds = self.combine_commands(balance_cmds, footstep_cmds, swing_cmds)
+
+        # Publish joint commands
+        self.publish_joint_commands(combined_cmds)
+
+        # Update gait phase
+        self.update_gait_phase()
+
+    def update_robot_state(self):
+        """Update robot state from sensor data"""
+        # Update CoM position and velocity from kinematic model
+        self.com_position = self.calculate_com_position()
+        self.com_velocity = self.calculate_com_velocity()
+
+        # Update foot positions from forward kinematics
+        self.foot_positions['left'] = self.calculate_left_foot_position()
+        self.foot_positions['right'] = self.calculate_right_foot_position()
+
+        # Update support foot based on ground contact
+        self.support_foot = self.determine_support_foot()
+
+    def calculate_com_position(self):
+        """Calculate center of mass position from joint states"""
+        # This would involve complex kinematic calculations
+        # based on the robot's specific kinematic model
+        pass
+
+    def calculate_com_velocity(self):
+        """Calculate center of mass velocity"""
+        # This would involve differentiation of CoM position
+        # or direct velocity calculation from joint velocities
+        pass
+
+    def combine_commands(self, balance_cmds, footstep_cmds, swing_cmds):
+        """Combine different control commands"""
+        # Weighted combination of different control objectives
+        combined = balance_cmds * 0.4 + footstep_cmds * 0.3 + swing_cmds * 0.3
+        return combined
+
+    def publish_joint_commands(self, commands):
+        """Publish computed joint commands"""
+        cmd_msg = Float64MultiArray()
+        cmd_msg.data = commands
+        self.joint_cmd_pub.publish(cmd_msg)
+
+    def update_gait_phase(self):
+        """Update gait phase based on time"""
+        dt = 1.0 / self.control_frequency
+        phase_increment = (self.gait_frequency * dt) % 1.0
+        self.gait_phase = (self.gait_phase + phase_increment) % 1.0
+```
+
+## Balance Control Strategies
+
+### Zero Moment Point (ZMP) Control
+```python
+# Example: ZMP-based balance controller
+class ZMPController:
+    def __init__(self, robot_mass, gravity, com_height):
+        self.mass = robot_mass
+        self.gravity = gravity
+        self.com_height = com_height
+        self.zmp_tolerance = 0.02  # 2cm tolerance
+
+    def compute_balance_correction(self, measured_zmp, desired_zmp, com_position, com_velocity):
+        """Compute balance correction based on ZMP error"""
+        # Calculate ZMP error
+        zmp_error = desired_zmp - measured_zmp
+
+        # Calculate CoM acceleration needed to correct ZMP
+        # ZMP = CoM_xy - (CoM_height / gravity) * CoM_acceleration_xy
+        com_acc_needed = - (gravity / self.com_height) * zmp_error
+
+        # Calculate velocity correction
+        vel_correction = com_acc_needed * 0.1  # Integration over time step
+
+        # Calculate position correction
+        pos_correction = vel_correction * 0.1  # Integration over time step
+
+        return pos_correction, vel_correction, com_acc_needed
+
+    def calculate_zmp(self, ground_reaction_force, ground_reaction_moment):
+        """Calculate ZMP from ground reaction forces and moments"""
+        # ZMP_x = (M_y + F_z * CoM_x) / F_z
+        # ZMP_y = (-M_x + F_z * CoM_y) / F_z
+        if abs(ground_reaction_force[2]) < 0.1:  # F_z is too small
+            return np.array([0.0, 0.0])
+
+        zmp_x = (ground_reaction_moment[1] + ground_reaction_force[2] * self.com_position[0]) / ground_reaction_force[2]
+        zmp_y = (-ground_reaction_moment[0] + ground_reaction_force[2] * self.com_position[1]) / ground_reaction_force[2]
+
+        return np.array([zmp_x, zmp_y])
+
+    def generate_desired_zmp_trajectory(self, walk_reference_trajectory):
+        """Generate desired ZMP trajectory for walking"""
+        desired_zmp_trajectory = []
+
+        for reference_point in walk_reference_trajectory:
+            # For walking, desired ZMP is typically ahead of stance foot
+            # during single support phase
+            if reference_point['phase'] == 'single_support':
+                # Place ZMP at the center of the stance foot
+                stance_foot_pos = reference_point['stance_foot_position']
+                desired_zmp = stance_foot_pos[:2]  # x, y only
+            else:  # double support phase
+                # Place ZMP between feet
+                left_foot = reference_point['left_foot_position']
+                right_foot = reference_point['right_foot_position']
+                desired_zmp = (left_foot[:2] + right_foot[:2]) / 2.0
+
+            desired_zmp_trajectory.append(desired_zmp)
+
+        return desired_zmp_trajectory
+```
+
+### Capture Point Control
+```python
+# Example: Capture point-based balance controller
+class CapturePointController:
+    def __init__(self, com_height, gravity):
+        self.com_height = com_height
+        self.gravity = gravity
+        self.omega = np.sqrt(gravity / com_height)
+
+    def calculate_capture_point(self, com_position, com_velocity):
+        """Calculate capture point from current CoM state"""
+        # Capture point = CoM position + CoM velocity / omega
+        capture_point = com_position[:2] + com_velocity[:2] / self.omega
+        return capture_point
+
+    def compute_balance_policy(self, current_capture_point, support_polygon):
+        """Compute balance policy based on capture point"""
+        # Check if capture point is within support polygon
+        if self.is_point_in_polygon(current_capture_point, support_polygon):
+            # Robot is stable, continue current gait
+            return 'stable'
+        else:
+            # Robot is unstable, need recovery action
+            recovery_action = self.compute_recovery_action(
+                current_capture_point, support_polygon
+            )
+            return recovery_action
+
+    def compute_recovery_action(self, capture_point, support_polygon):
+        """Compute recovery action for unstable state"""
+        # Calculate where to place the next foot to regain stability
+        recovery_foot_position = self.calculate_recovery_foot_position(
+            capture_point, support_polygon
+        )
+
+        # Determine recovery action type
+        if self.can_step_immediately(recovery_foot_position):
+            return 'step_to_recover'
+        elif self.can_adjust_com(recovery_foot_position):
+            return 'adjust_com'
+        else:
+            return 'emergency_stop'
+
+    def calculate_recovery_foot_position(self, capture_point, support_polygon):
+        """Calculate optimal recovery foot position"""
+        # Find closest point in support polygon to capture point
+        closest_point = self.closest_point_in_polygon(capture_point, support_polygon)
+
+        # Add safety margin
+        recovery_position = closest_point + self.calculate_safety_offset()
+
+        return recovery_position
+
+    def calculate_safety_offset(self):
+        """Calculate safety offset for recovery"""
+        # Add small offset to ensure stability
+        safety_margin = 0.05  # 5cm safety margin
+        return np.array([0.0, safety_margin])
+```
+
+## Gait Generation and Control
+
+### Walk Pattern Generation
+```python
+# Example: Walk pattern generator
+class WalkPatternGenerator:
+    def __init__(self):
+        self.step_length = 0.3  # meters
+        self.step_width = 0.2   # meters
+        self.step_height = 0.05 # meters (clearance)
+        self.gait_frequency = 2.0  # Hz
+        self.stride_duration = 1.0 / self.gait_frequency
+
+    def generate_walk_pattern(self, walk_direction, speed, duration):
+        """Generate walk pattern for specified duration"""
+        num_steps = int(duration * self.gait_frequency)
+        walk_pattern = []
+
+        current_pos = np.array([0.0, 0.0, 0.0])  # Start at origin
+        support_foot = 'left'
+
+        for step in range(num_steps):
+            # Calculate step parameters
+            step_vector = walk_direction * self.step_length * (speed / 1.0)  # Normalize to 1.0 m/s
+            step_lateral_offset = self.calculate_lateral_offset(support_foot)
+
+            # Calculate next foot position
+            if support_foot == 'left':
+                next_right_pos = current_pos + step_vector + np.array([0, -step_lateral_offset, 0])
+                walk_pattern.append({
+                    'step': step,
+                    'swing_foot': 'right',
+                    'swing_position': next_right_pos,
+                    'support_foot': 'left',
+                    'support_position': current_pos,
+                    'duration': self.stride_duration / 2.0  # Half stride for single support
+                })
+
+                # Update current position to right foot
+                current_pos = next_right_pos
+                support_foot = 'right'
+            else:  # support_foot == 'right'
+                next_left_pos = current_pos + step_vector + np.array([0, step_lateral_offset, 0])
+                walk_pattern.append({
+                    'step': step,
+                    'swing_foot': 'left',
+                    'swing_position': next_left_pos,
+                    'support_foot': 'right',
+                    'support_position': current_pos,
+                    'duration': self.stride_duration / 2.0
+                })
+
+                # Update current position to left foot
+                current_pos = next_left_pos
+                support_foot = 'left'
+
+        return walk_pattern
+
+    def calculate_lateral_offset(self, foot):
+        """Calculate lateral offset for foot placement"""
+        if foot == 'left':
+            return self.step_width / 2.0
+        else:  # right foot
+            return -self.step_width / 2.0
+
+    def generate_swing_trajectory(self, start_pos, end_pos, step_height):
+        """Generate smooth swing leg trajectory"""
+        # Use cubic spline for smooth trajectory
+        trajectory_points = []
+
+        # Define via points for the swing trajectory
+        mid_x = (start_pos[0] + end_pos[0]) / 2.0
+        mid_y = (start_pos[1] + end_pos[1]) / 2.0
+        mid_z = max(start_pos[2], end_pos[2]) + step_height  # Apex of swing
+
+        via_point = np.array([mid_x, mid_y, mid_z])
+
+        # Generate trajectory using cubic interpolation
+        for t in np.linspace(0, 1, 20):  # 20 points for smooth motion
+            if t < 0.5:
+                # Rising phase
+                z = start_pos[2] + (via_point[2] - start_pos[2]) * (2 * t)**2
+                x = start_pos[0] + (via_point[0] - start_pos[0]) * t * 2
+                y = start_pos[1] + (via_point[1] - start_pos[1]) * t * 2
+            else:
+                # Falling phase
+                z = via_point[2] + (end_pos[2] - via_point[2]) * ((2 * t - 1)**2)
+                x = via_point[0] + (end_pos[0] - via_point[0]) * (t - 0.5) * 2
+                y = via_point[1] + (end_pos[1] - via_point[1]) * (t - 0.5) * 2
+
+            trajectory_points.append(np.array([x, y, z]))
+
+        return trajectory_points
+```
+
+## Swing Leg Control
+
+### Trajectory Following Control
+```python
+# Example: Swing leg trajectory controller
+class SwingLegController:
+    def __init__(self):
+        self.kp = 100.0  # Proportional gain
+        self.kd = 20.0   # Derivative gain
+        self.ki = 10.0   # Integral gain
+
+    def compute_swing_control(self, desired_trajectory, current_position, current_velocity, time_step):
+        """Compute control for swing leg following trajectory"""
+        # Get desired state from trajectory
+        desired_pos, desired_vel, desired_acc = self.get_trajectory_state(desired_trajectory, time_step)
+
+        # Calculate errors
+        pos_error = desired_pos - current_position
+        vel_error = desired_vel - current_velocity
+
+        # Compute control command using PD control
+        control_command = self.kp * pos_error + self.kd * vel_error + self.ki * self.integral_error
+
+        return control_command
+
+    def get_trajectory_state(self, trajectory, time_step):
+        """Get desired position, velocity, and acceleration at time step"""
+        # Interpolate trajectory at specific time
+        idx = int(time_step * len(trajectory))  # Simplified indexing
+        idx = min(idx, len(trajectory) - 1)
+
+        desired_pos = trajectory[idx]
+
+        # Calculate velocity (difference between consecutive points)
+        if idx > 0:
+            prev_pos = trajectory[idx - 1]
+            desired_vel = (desired_pos - prev_pos) / (1.0 / len(trajectory))
+        else:
+            desired_vel = np.zeros(3)
+
+        # Calculate acceleration
+        if idx > 1:
+            prev_vel = self.get_prev_velocity(trajectory, idx - 1)
+            desired_acc = (desired_vel - prev_vel) / (1.0 / len(trajectory))
+        else:
+            desired_acc = np.zeros(3)
+
+        return desired_pos, desired_vel, desired_acc
+
+    def get_prev_velocity(self, trajectory, idx):
+        """Helper to get previous velocity"""
+        if idx > 0:
+            prev_pos = trajectory[idx - 1]
+            curr_pos = trajectory[idx]
+            dt = 1.0 / len(trajectory)
+            return (curr_pos - prev_pos) / dt
+        else:
+            return np.zeros(3)
+```
+
+## Integration with Navigation
+
+### Navigation-Integrated Biped Control
+```python
+# Example: Integration with navigation system
+class NavigationBipedController:
+    def __init__(self, base_controller):
+        self.base_controller = base_controller
+        self.path_tracker = PathTracker()
+        self.obstacle_avoider = ObstacleAvoidanceController()
+        self.speed_controller = SpeedController()
+
+    def follow_navigation_path(self, path, obstacle_data):
+        """Follow navigation path with biped-specific control"""
+        # Track the path while maintaining biped stability
+        current_pose = self.get_robot_pose()
+
+        # Calculate desired velocity based on path tracking
+        desired_velocity = self.path_tracker.calculate_desired_velocity(
+            current_pose, path
+        )
+
+        # Adjust for obstacles
+        obstacle_adjusted_velocity = self.obstacle_avoider.avoid_obstacles(
+            desired_velocity, obstacle_data
+        )
+
+        # Apply to biped controller
+        biped_commands = self.speed_controller.adapt_to_biped_gaits(
+            obstacle_adjusted_velocity
+        )
+
+        # Execute with base biped controller
+        self.base_controller.execute_commands(biped_commands)
+
+        return biped_commands
+
+    def handle_navigation_events(self, event):
+        """Handle navigation-specific events"""
+        if event.type == 'obstacle_detected':
+            # Immediate balance adjustment for sudden stops
+            self.base_controller.emergency_balance_adjustment()
+        elif event.type == 'turning_required':
+            # Adjust gait pattern for turning
+            self.base_controller.adjust_gait_for_turning(event.turn_angle)
+        elif event.type == 'goal_reached':
+            # Transition to standing posture
+            self.base_controller.transition_to_standing()
+```
+
+## Isaac ROS Integration
+
+### Isaac ROS Biped Controllers
+```python
+# Example: Isaac ROS integration for biped control
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import JointState, Imu
+from geometry_msgs.msg import Twist, PoseStamped
+from std_msgs.msg import Float64MultiArray
+from builtin_interfaces.msg import Duration
+import cupy as cp  # GPU acceleration
+
+class IsaacBipedControllerNode(Node):
+    def __init__(self):
+        super().__init__('isaac_biped_controller')
+
+        # Isaac ROS specific components
+        self.gpu_balance_controller = self.initialize_gpu_balance_controller()
+        self.gpu_trajectory_generator = self.initialize_gpu_trajectory_generator()
+
+        # Publishers and subscribers
+        self.joint_cmd_pub = self.create_publisher(Float64MultiArray, '/isaac/joint_commands', 10)
+        self.joint_state_sub = self.create_subscription(JointState, '/isaac/joint_states', self.joint_state_callback, 10)
+        self.imu_sub = self.create_subscription(Imu, '/isaac/imu', self.imu_callback, 10)
+        self.command_sub = self.create_subscription(Twist, '/cmd_vel', self.velocity_command_callback, 10)
+
+        # Control timer
+        self.control_timer = self.create_timer(1.0/200.0, self.control_loop)  # 200 Hz
+
+        # Robot state
+        self.current_joint_states = None
+        self.current_imu_data = None
+        self.desired_velocity = Twist()
+
+        # GPU memory management
+        self.gpu_memory_pool = self.initialize_gpu_memory_pool()
+
+    def initialize_gpu_balance_controller(self):
+        """Initialize GPU-accelerated balance controller"""
+        if cp.cuda.is_available():
+            self.get_logger().info("Initializing GPU-accelerated biped controller")
+            # Load CUDA kernels for balance control
+            return GPUAcceleratedBalanceController()
+        else:
+            self.get_logger().warn("GPU not available, using CPU controller")
+            return CPUBipedController()
+
+    def control_loop(self):
+        """Main control loop with GPU acceleration"""
+        if (self.current_joint_states is None or
+            self.current_imu_data is None):
+            return
+
+        # Transfer sensor data to GPU
+        gpu_joint_data = cp.asarray(self.current_joint_states.position)
+        gpu_imu_data = cp.asarray([
+            self.current_imu_data.linear_acceleration.x,
+            self.current_imu_data.linear_acceleration.y,
+            self.current_imu_data.linear_acceleration.z,
+            self.current_imu_data.angular_velocity.x,
+            self.current_imu_data.angular_velocity.y,
+            self.current_imu_data.angular_velocity.z
+        ])
+
+        # Compute balance control on GPU
+        gpu_control_commands = self.gpu_balance_controller.compute_gpu(
+            gpu_joint_data, gpu_imu_data, self.desired_velocity
+        )
+
+        # Transfer results back to CPU
+        control_commands = cp.asnumpy(gpu_control_commands)
+
+        # Publish commands
+        cmd_msg = Float64MultiArray()
+        cmd_msg.data = control_commands.tolist()
+        self.joint_cmd_pub.publish(cmd_msg)
+
+    def joint_state_callback(self, msg):
+        """Handle joint state updates"""
+        self.current_joint_states = msg
+
+    def imu_callback(self, msg):
+        """Handle IMU data for balance control"""
+        self.current_imu_data = msg
+
+    def velocity_command_callback(self, msg):
+        """Handle velocity commands from navigation"""
+        self.desired_velocity = msg
+```
+
+## Safety and Stability Considerations
+
+### Emergency Recovery
+```python
+# Example: Emergency recovery controller
+class EmergencyRecoveryController:
+    def __init__(self):
+        self.stability_threshold = 0.7
+        self.recovery_modes = {
+            'step_recovery': self.step_recovery,
+            'crouch_recovery': self.crouch_recovery,
+            'arm_assisted_recovery': self.arm_assisted_recovery,
+            'shutdown': self.emergency_shutdown
+        }
+
+    def assess_stability(self, com_state, imu_data, contact_states):
+        """Assess current stability state"""
+        # Calculate stability metrics
+        zmp_error = self.calculate_zmp_error(com_state)
+        com_deviation = self.calculate_com_deviation(com_state)
+        angular_velocity = np.linalg.norm([
+            imu_data.angular_velocity.x,
+            imu_data.angular_velocity.y,
+            imu_data.angular_velocity.z
+        ])
+
+        # Calculate overall stability score
+        stability_score = self.calculate_stability_score(
+            zmp_error, com_deviation, angular_velocity
+        )
+
+        return stability_score
+
+    def calculate_stability_score(self, zmp_error, com_deviation, angular_velocity):
+        """Calculate stability score from multiple factors"""
+        # Normalize factors to 0-1 range
+        zmp_normalized = min(1.0, zmp_error / 0.1)  # 10cm threshold
+        com_normalized = min(1.0, com_deviation / 0.2)  # 20cm threshold
+        angvel_normalized = min(1.0, angular_velocity / 1.0)  # 1 rad/s threshold
+
+        # Weighted combination (higher score = more stable)
+        stability_score = 1.0 - (0.4 * zmp_normalized + 0.4 * com_normalized + 0.2 * angvel_normalized)
+
+        return max(0.0, min(1.0, stability_score))
+
+    def select_recovery_action(self, stability_score, current_state):
+        """Select appropriate recovery action based on stability"""
+        if stability_score > self.stability_threshold:
+            # Still stable, no recovery needed
+            return None
+        elif stability_score > 0.3:
+            # Moderate instability - step recovery
+            return 'step_recovery'
+        elif stability_score > 0.1:
+            # High instability - crouch recovery
+            return 'crouch_recovery'
+        else:
+            # Critical instability - emergency shutdown
+            return 'shutdown'
+
+    def step_recovery(self, current_state):
+        """Compute step recovery action"""
+        # Calculate where to place next foot for stability
+        capture_point = self.calculate_capture_point(current_state)
+        support_polygon = self.calculate_support_polygon(current_state)
+
+        # Find optimal step location
+        optimal_step = self.find_optimal_recovery_step(capture_point, support_polygon)
+
+        return optimal_step
+
+    def crouch_recovery(self, current_state):
+        """Compute crouch recovery action"""
+        # Lower CoM to increase stability
+        # This involves bending knees and hips to lower the center of mass
+        crouch_commands = {
+            'hip_pitch': 0.3,  # Bend hips forward
+            'knee_flex': 0.5,  # Bend knees
+            'ankle_angle': 0.1  # Adjust ankle for balance
+        }
+
+        return crouch_commands
+
+    def arm_assisted_recovery(self, current_state):
+        """Use arms for balance recovery"""
+        # Move arms to counteract imbalance
+        # This can provide additional moment arm for balance
+        arm_commands = {
+            'left_arm': self.calculate_arm_position_for_balance(current_state, 'left'),
+            'right_arm': self.calculate_arm_position_for_balance(current_state, 'right')
+        }
+
+        return arm_commands
+
+    def emergency_shutdown(self, current_state):
+        """Emergency shutdown procedure"""
+        # Safely stop all motors
+        # Attempt to bring robot to safe position
+        shutdown_commands = {
+            'motor_torque_limits': 0.0,
+            'safe_posture': self.calculate_safe_fall_posture(current_state)
+        }
+
+        return shutdown_commands
+```
+
+## Performance Optimization
+
+### Real-Time Considerations
+```python
+# Example: Real-time optimized biped controller
+class RealTimeBipedController:
+    def __init__(self):
+        self.max_control_time = 5.0  # ms maximum control cycle time
+        self.control_frequency = 200.0  # Hz
+        self.enable_adaptive_control = True
+
+        # Pre-allocated memory for real-time performance
+        self.temp_arrays = {
+            'com_position': np.zeros(3),
+            'com_velocity': np.zeros(3),
+            'zmp_calc': np.zeros(2),
+            'control_out': np.zeros(12)  # Example: 12 joint commands
+        }
+
+        # Simplified models for real-time use
+        self.simplified_balance_model = self.create_simplified_model()
+
+    def real_time_control_cycle(self, sensor_data):
+        """Real-time control cycle with timing guarantees"""
+        start_time = time.time()
+
+        # Use pre-allocated arrays to avoid memory allocation
+        com_pos = self.temp_arrays['com_position']
+        com_vel = self.temp_arrays['com_velocity']
+        zmp = self.temp_arrays['zmp_calc']
+        output = self.temp_arrays['control_out']
+
+        # Fast state estimation
+        self.estimate_state_fast(sensor_data, com_pos, com_vel)
+
+        # Fast balance control
+        self.compute_balance_control_fast(com_pos, com_vel, zmp, output)
+
+        # Check timing
+        elapsed_time = (time.time() - start_time) * 1000  # ms
+        if elapsed_time > self.max_control_time:
+            self.get_logger().warn(f"Control cycle exceeded time limit: {elapsed_time}ms > {self.max_control_time}ms")
+
+        return output
+
+    def estimate_state_fast(self, sensor_data, com_pos, com_vel):
+        """Fast state estimation using simplified model"""
+        # Use simplified kinematic model
+        # Skip complex calculations that aren't time-critical
+        pass
+
+    def compute_balance_control_fast(self, com_pos, com_vel, zmp, output):
+        """Fast balance control using simplified model"""
+        # Use simplified balance control law
+        # Pre-computed gains and matrices
+        pass
+
+    def create_simplified_model(self):
+        """Create simplified model for real-time use"""
+        # Linearized model around nominal standing position
+        # Reduced-order model
+        # Lookup tables for complex calculations
+        pass
+```
+
+## Configuration and Parameters
+
+### Biped Controller Configuration
+```yaml
+# Biped controller configuration
+biped_controller:
+  ros__parameters:
+    # General parameters
+    control_frequency: 200.0  # Hz
+    enable_gpu_acceleration: true
+    gpu_device_id: 0
+
+    # Balance control parameters
+    balance:
+      kp: 100.0
+      ki: 10.0
+      kd: 20.0
+      com_height: 0.7  # meters
+      gravity: 9.81
+      zmp_tolerance: 0.02  # meters
+      stability_threshold: 0.7
+
+    # Gait parameters
+    gait:
+      frequency: 2.0  # Hz
+      step_length: 0.3  # meters
+      step_width: 0.2   # meters
+      step_height: 0.05 # meters
+      single_support_ratio: 0.8  # 80% of stride in single support
+
+    # Walking parameters
+    walking:
+      max_linear_velocity: 0.4  # m/s
+      max_angular_velocity: 0.5  # rad/s
+      min_step_length: 0.15  # meters
+      max_step_length: 0.6   # meters
+      turning_strategy: "step_and_turn"  # options: step_and_turn, pivot_turn
+
+    # Joint control parameters
+    joint_control:
+      position_gain: 100.0
+      velocity_gain: 20.0
+      effort_limit: 100.0  # N*m
+      enable_feedforward: true
+
+    # Safety parameters
+    safety:
+      stability_threshold: 0.7
+      emergency_stop_threshold: 0.1
+      recovery_enabled: true
+      max_tilt_angle: 30.0  # degrees
+
+    # Isaac ROS integration
+    isaac_ros:
+      enable_gpu_balance_control: true
+      tensorrt_optimization: true
+      prediction_horizon: 0.5  # seconds
+```
+
+## Testing and Validation
+
+### Biped Controller Tests
+```python
+# Example: Biped controller testing
+class BipedControllerTester:
+    def __init__(self):
+        self.test_scenarios = [
+            "standing_balance",
+            "slow_walking",
+            "fast_walking",
+            "turning",
+            "obstacle_negotiation",
+            "recovery_scenarios"
+        ]
+
+    def test_standing_balance(self):
+        """Test standing balance stability"""
+        # Initialize robot in standing position
+        initial_poses = self.get_nominal_standing_poses()
+
+        # Apply small disturbances
+        for disturbance in self.generate_small_disturbances():
+            # Apply disturbance
+            self.apply_disturbance(disturbance)
+
+            # Measure balance recovery
+            recovery_time = self.measure_balance_recovery_time()
+            stability_error = self.measure_stability_error()
+
+            # Verify recovery within acceptable limits
+            assert recovery_time < 2.0, f"Recovery took too long: {recovery_time}s"
+            assert stability_error < 0.1, f"Stability error too high: {stability_error}"
+
+    def test_walking_stability(self):
+        """Test walking stability across different speeds"""
+        walking_speeds = [0.1, 0.2, 0.3, 0.4]  # m/s
+
+        for speed in walking_speeds:
+            # Set walking speed
+            self.set_walking_speed(speed)
+
+            # Walk for specified distance
+            initial_pose = self.get_robot_pose()
+            self.start_walking()
+
+            # Measure stability during walking
+            stability_metrics = self.collect_stability_metrics(duration=10.0)
+
+            # Verify stability within acceptable limits
+            avg_stability = sum(stability_metrics) / len(stability_metrics)
+            assert avg_stability > 0.8, f"Stability too low at {speed}m/s: {avg_stability}"
+
+    def generate_small_disturbances(self):
+        """Generate small disturbances for balance testing"""
+        disturbances = [
+            {"type": "push", "direction": [0.1, 0, 0], "duration": 0.1},  # Forward push
+            {"type": "push", "direction": [-0.1, 0, 0], "duration": 0.1}, # Backward push
+            {"type": "push", "direction": [0, 0.1, 0], "duration": 0.1},  # Lateral push
+            {"type": "torque", "axis": [0, 0, 1], "magnitude": 5.0},     # Yaw disturbance
+        ]
+        return disturbances
+
+    def collect_stability_metrics(self, duration):
+        """Collect stability metrics over time"""
+        metrics = []
+        start_time = time.time()
+
+        while time.time() - start_time < duration:
+            stability = self.measure_current_stability()
+            metrics.append(stability)
+            time.sleep(0.01)  # 100 Hz sampling
+
+        return metrics
+
+    def measure_current_stability(self):
+        """Measure current stability of the robot"""
+        # Calculate ZMP error
+        zmp_error = self.calculate_current_zmp_error()
+
+        # Calculate CoM deviation
+        com_deviation = self.calculate_current_com_deviation()
+
+        # Calculate angular velocity
+        angular_vel = self.calculate_current_angular_velocity()
+
+        # Combine into stability metric (higher is more stable)
+        stability = 1.0 / (1.0 + zmp_error + com_deviation + angular_vel)
+
+        return stability
+```
+
+## Summary
+
+Biped controllers for humanoid robots represent a complex integration of balance control, gait generation, and motion planning. The key challenges include maintaining dynamic stability during locomotion, coordinating multiple joints for natural walking patterns, and adapting to various terrains and navigation requirements. Successful implementation requires hierarchical control structures with real-time performance guarantees, safety mechanisms for instability recovery, and integration with higher-level navigation systems. The use of Isaac ROS provides GPU acceleration for real-time performance while maintaining the precision required for stable bipedal locomotion.

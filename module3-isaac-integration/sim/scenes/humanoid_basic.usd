@@ -1,0 +1,180 @@
+#usda 1.0
+
+def Xform "World"
+{
+    def Xform "GroundPlane"
+    {
+        def Mesh "Plane"
+        {
+            int[] faceVertexCounts = [4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+            float3[] points = [(-5, 0, -5), (5, 0, -5), (5, 0, 5), (-5, 0, 5), (-5, 0, -4), (5, 0, -4), (5, 0, -3), (-5, 0, -3), (-5, 0, -2), (5, 0, -2), (5, 0, -1), (-5, 0, -1), (-5, 0, 0), (5, 0, 0), (5, 0, 1), (-5, 0, 1)]
+            normal3f[] normals = [(0, 1, 0), (0, 1, 0), (0, 1, 0), (0, 1, 0), (0, 1, 0), (0, 1, 0), (0, 1, 0), (0, 1, 0), (0, 1, 0), (0, 1, 0), (0, 1, 0), (0, 1, 0), (0, 1, 0), (0, 1, 0), (0, 1, 0), (0, 1, 0)]
+            texture:st = [(0, 0), (10, 0), (10, 10), (0, 10), (0, 0), (10, 0), (10, 2), (0, 2), (0, 0), (10, 0), (10, 2), (0, 2), (0, 0), (10, 0), (10, 2), (0, 2)]
+        }
+    }
+
+    def Xform "HumanoidRobot"
+    {
+        def Xform "Pelvis"
+        {
+            def Capsule "PelvisShape"
+            {
+                float radius = 0.15
+                float height = 0.2
+                color3f[] displayColor = [(0.8, 0.2, 0.2)]
+            }
+        }
+
+        def Xform "Torso"
+        {
+            add prepend references = </World/HumanoidRobot/Pelvis>
+            def Capsule "TorsoShape"
+            {
+                float radius = 0.12
+                float height = 0.4
+                color3f[] displayColor = [(0.2, 0.2, 0.8)]
+            }
+        }
+
+        def Xform "Head"
+        {
+            add prepend references = </World/HumanoidRobot/Torso>
+            def Sphere "HeadShape"
+            {
+                float radius = 0.1
+                color3f[] displayColor = [(0.9, 0.9, 0.7)]
+            }
+        }
+
+        def Xform "LeftArm"
+        {
+            add prepend references = </World/HumanoidRobot/Torso>
+            def Capsule "UpperArmShape"
+            {
+                float radius = 0.06
+                float height = 0.3
+                color3f[] displayColor = [(0.5, 0.5, 0.5)]
+            }
+            def Capsule "LowerArmShape"
+            {
+                float radius = 0.05
+                float height = 0.25
+                color3f[] displayColor = [(0.6, 0.6, 0.6)]
+            }
+        }
+
+        def Xform "RightArm"
+        {
+            add prepend references = </World/HumanoidRobot/Torso>
+            def Capsule "UpperArmShape"
+            {
+                float radius = 0.06
+                float height = 0.3
+                color3f[] displayColor = [(0.5, 0.5, 0.5)]
+            }
+            def Capsule "LowerArmShape"
+            {
+                float radius = 0.05
+                float height = 0.25
+                color3f[] displayColor = [(0.6, 0.6, 0.6)]
+            }
+        }
+
+        def Xform "LeftLeg"
+        {
+            add prepend references = </World/HumanoidRobot/Pelvis>
+            def Capsule "UpperLegShape"
+            {
+                float radius = 0.08
+                float height = 0.35
+                color3f[] displayColor = [(0.4, 0.4, 0.7)]
+            }
+            def Capsule "LowerLegShape"
+            {
+                float radius = 0.07
+                float height = 0.3
+                color3f[] displayColor = [(0.5, 0.5, 0.8)]
+            }
+        }
+
+        def Xform "RightLeg"
+        {
+            add prepend references = </World/HumanoidRobot/Pelvis>
+            def Capsule "UpperLegShape"
+            {
+                float radius = 0.08
+                float height = 0.35
+                color3f[] displayColor = [(0.4, 0.4, 0.7)]
+            }
+            def Capsule "LowerLegShape"
+            {
+                float radius = 0.07
+                float height = 0.3
+                color3f[] displayColor = [(0.5, 0.5, 0.8)]
+            }
+        }
+    }
+
+    def Xform "EnvironmentObjects"
+    {
+        def Xform "Table"
+        {
+            def Cube "TableTop"
+            {
+                float3 size = (1.0, 0.8, 0.8)
+                color3f[] displayColor = [(0.6, 0.4, 0.2)]
+            }
+            def Cube "TableLeg1"
+            {
+                float3 size = (0.05, 0.05, 0.7)
+                float3 xformOp:translate = (0.45, -0.35, -0.35)
+                color3f[] displayColor = [(0.6, 0.4, 0.2)]
+            }
+            def Cube "TableLeg2"
+            {
+                float3 size = (0.05, 0.05, 0.7)
+                float3 xformOp:translate = (-0.45, -0.35, -0.35)
+                color3f[] displayColor = [(0.6, 0.4, 0.2)]
+            }
+            def Cube "TableLeg3"
+            {
+                float3 size = (0.05, 0.05, 0.7)
+                float3 xformOp:translate = (0.45, -0.35, 0.35)
+                color3f[] displayColor = [(0.6, 0.4, 0.2)]
+            }
+            def Cube "TableLeg4"
+            {
+                float3 size = (0.05, 0.05, 0.7)
+                float3 xformOp:translate = (-0.45, -0.35, 0.35)
+                color3f[] displayColor = [(0.6, 0.4, 0.2)]
+            }
+        }
+
+        def Xform "Box"
+        {
+            float3 xformOp:translate = (2.0, 0.2, 0.0)
+            def Cube "BoxShape"
+            {
+                float3 size = (0.4, 0.4, 0.4)
+                color3f[] displayColor = [(0.2, 0.6, 0.2)]
+            }
+        }
+    }
+
+    def Xform "Lighting"
+    {
+        def DomeLight "DomeLight"
+        {
+            color3f inputs:color = (0.2, 0.2, 0.2)
+            float inputs:intensity = 3000
+        }
+
+        def DistantLight "KeyLight"
+        {
+            color3f inputs:color = (1.0, 0.95, 0.9)
+            float inputs:intensity = 500
+            float3 xformOp:rotateXYZ = (-15, 45, 0)
+        }
+    }
+}

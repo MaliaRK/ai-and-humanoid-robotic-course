@@ -1,0 +1,132 @@
+# Domain Randomization Configuration for Isaac Sim
+# This configuration defines the randomization parameters for synthetic data generation
+
+domain_randomization:
+  # Lighting randomization
+  lighting:
+    dome_light:
+      intensity_range: [1000, 5000]  # Range for dome light intensity
+      color_temperature_range: [5000, 8000]  # Color temperature in Kelvin
+      enable: true
+
+    directional_light:
+      intensity_range: [2000, 8000]
+      position_range: [-5.0, -5.0, 3.0, 5.0, 5.0, 10.0]  # [min_x, min_y, min_z, max_x, max_y, max_z]
+      enable: true
+
+    point_lights:
+      count_range: [1, 3]  # Random number of point lights
+      intensity_range: [500, 3000]
+      position_range: [-3.0, -3.0, 1.0, 3.0, 3.0, 5.0]
+      radius_range: [0.1, 0.5]
+      enable: true
+
+  # Material randomization
+  materials:
+    ground_plane:
+      textures:
+        - "path/to/concrete_texture1.png"
+        - "path/to/concrete_texture2.png"
+        - "path/to/wood_texture1.png"
+        - "path/to/wood_texture2.png"
+        - "path/to/carpet_texture1.png"
+      roughness_range: [0.1, 0.9]
+      metallic_range: [0.0, 0.2]
+      enable: true
+
+    robot_materials:
+      base_color_range: [[0.1, 0.1, 0.1], [1.0, 1.0, 1.0]]
+      roughness_range: [0.2, 0.8]
+      enable: true
+
+    environment_objects:
+      textures:
+        - "path/to/metal_texture1.png"
+        - "path/to/plastic_texture1.png"
+        - "path/to/wood_texture3.png"
+      color_variation: 0.3  # Maximum color variation (0.0 to 1.0)
+      enable: true
+
+  # Geometry randomization
+  geometry:
+    object_placement:
+      min_distance: 0.5  # Minimum distance between objects
+      max_objects: 10    # Maximum number of random objects
+      position_range: [-4.0, 0.0, -4.0, 4.0, 2.0, 4.0]  # [min_x, min_y, min_z, max_x, max_y, max_z]
+      scale_range: [0.5, 1.5]  # Uniform scale range
+      enable: true
+
+    humanoid_pose:
+      joint_angle_range: [-0.5, 0.5]  # Random joint angle variation in radians
+      position_jitter: [0.05, 0.05, 0.05]  # Random position offset [x, y, z]
+      enable: true
+
+  # Physics randomization
+  physics:
+    ground_friction:
+      static_range: [0.4, 0.9]
+      dynamic_range: [0.3, 0.8]
+      enable: true
+
+    robot_dynamics:
+      mass_multiplier_range: [0.8, 1.2]  # Scale robot mass
+      inertia_multiplier_range: [0.8, 1.2]  # Scale robot inertia
+      enable: true
+
+    environment_dynamics:
+      restitution_range: [0.0, 0.3]  # Bounciness range
+      enable: true
+
+  # Sensor randomization
+  sensors:
+    camera:
+      noise_stddev_range: [0.001, 0.01]  # Standard deviation for Gaussian noise
+      exposure_time_range: [0.001, 0.01]  # Exposure time range in seconds
+      enable: true
+
+    depth_camera:
+      noise_stddev_range: [0.001, 0.02]  # Depth noise
+      enable: true
+
+    imu:
+      noise_density_range: [0.0001, 0.001]  # Noise density for continuous noise
+      random_walk_range: [0.00001, 0.0001]  # Random walk coefficient
+      enable: true
+
+  # Environmental randomization
+  environment:
+    weather_effects:
+      fog_density_range: [0.0, 0.1]  # Fog density range
+      enable: false  # Disabled by default
+
+    time_of_day:
+      hour_range: [6, 20]  # Hour range for sun position (6 AM to 8 PM)
+      enable: true
+
+    atmospheric_effects:
+      enable: false
+
+  # Randomization scheduling
+  scheduling:
+    # Curriculum learning parameters
+    initial_randomization_ratio: 0.2  # Start with 20% randomization
+    randomization_growth_rate: 0.05   # Increase by 5% every 1000 steps
+    max_randomization_ratio: 1.0      # Maximum 100% randomization
+    update_frequency: 100             # Update randomization every N steps
+
+  # Performance parameters
+  performance:
+    max_scenes_per_variation: 100     # Max scenes before changing variation
+    batch_size: 32                    # Batch size for data generation
+    render_resolution: [640, 480]     # Resolution for rendering [width, height]
+    enable_texture_compression: true  # Enable texture compression for performance
+
+  # Validation parameters
+  validation:
+    # Parameters to monitor during randomization
+    validation_metrics:
+      - "image_brightness_range"  # Ensure images are not too dark or bright
+      - "object_visibility"       # Ensure objects are visible
+      - "sensor_data_quality"     # Ensure sensor data is valid
+    min_brightness: 0.1           # Minimum acceptable brightness (0.0 to 1.0)
+    max_brightness: 0.95          # Maximum acceptable brightness (0.0 to 1.0)

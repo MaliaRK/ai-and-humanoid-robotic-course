@@ -1,0 +1,196 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <!-- Combined Sensor Configuration for Humanoid Robot -->
+
+  <!-- Include individual sensor configurations -->
+  <xacro:include filename="$(find your_robot_description)/plugins/lidar_plugin_config.xacro"/>
+  <xacro:include filename="$(find your_robot_description)/plugins/camera_plugin_config.xacro"/>
+  <xacro:include filename="$(find your_robot_description)/plugins/imu_plugin_config.xacro"/>
+
+  <!-- Define sensor mounting points on the robot -->
+  <joint name="lidar_mount_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="lidar_mount"/>
+    <origin xyz="0.2 0 0.3" rpy="0 0 0"/>
+  </joint>
+
+  <link name="lidar_mount">
+    <visual>
+      <geometry>
+        <box size="0.05 0.05 0.05"/>
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.05 0.05 0.05"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.1"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <joint name="camera_mount_joint" type="fixed">
+    <parent link="head_link"/>
+    <child link="camera_mount"/>
+    <origin xyz="0.05 0 0.05" rpy="0 0 0"/>
+  </joint>
+
+  <link name="camera_mount">
+    <visual>
+      <geometry>
+        <box size="0.03 0.03 0.03"/>
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.03 0.03 0.03"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.05"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+  </link>
+
+  <joint name="imu_mount_joint" type="fixed">
+    <parent link="torso_link"/>
+    <child link="imu_mount"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+  </joint>
+
+  <link name="imu_mount">
+    <visual>
+      <geometry>
+        <box size="0.02 0.02 0.02"/>
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.02 0.02 0.02"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.01"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+    </inertial>
+  </link>
+
+  <!-- Instantiate sensors using the macros -->
+  <xacro:lidar_sensor
+    name="front_lidar"
+    parent_link="lidar_mount"
+    topic="/front_scan"
+    update_rate="10"
+    samples="720"
+    min_angle="${-pi/2}"
+    max_angle="${pi/2}"
+    min_range="0.1"
+    max_range="30.0"
+    resolution="1"
+    gaussian_noise="0.01">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </xacro:lidar_sensor>
+
+  <xacro:rgb_camera
+    name="front_camera"
+    parent_link="camera_mount"
+    topic="/front_camera"
+    update_rate="30"
+    width="800"
+    height="600"
+    fov="1.047"  <!-- 60 degrees -->
+    format="R8G8B8"
+    near="0.1"
+    far="100">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </xacro:rgb_camera>
+
+  <xacro:depth_camera
+    name="depth_camera"
+    parent_link="camera_mount"
+    rgb_topic="/depth_camera/rgb"
+    depth_topic="/depth_camera/depth"
+    update_rate="30"
+    width="640"
+    height="480"
+    fov="1.047"  <!-- 60 degrees -->
+    near="0.1"
+    far="10">
+    <origin xyz="0.05 0 0" rpy="0 0 0"/>
+  </xacro:depth_camera>
+
+  <xacro:imu_sensor
+    name="base_imu"
+    parent_link="imu_mount"
+    topic="/imu/data"
+    update_rate="100"
+    gaussian_noise="0.01">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </xacro:imu_sensor>
+
+  <!-- Additional sensors for humanoid robot -->
+  <!-- Sonar sensors for proximity detection -->
+  <xacro:macro name="sonar_sensor" params="name parent_link *origin topic update_rate min_range max_range fov">
+    <gazebo reference="${parent_link}">
+      <sensor name="${name}" type="ray">
+        <always_on>true</always_on>
+        <update_rate>${update_rate}</update_rate>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>5</samples>
+              <resolution>1</resolution>
+              <min_angle>${-fov/2}</min_angle>
+              <max_angle>${fov/2}</max_angle>
+            </horizontal>
+          </scan>
+          <range>
+            <min>${min_range}</min>
+            <max>${max_range}</max>
+            <resolution>0.01</resolution>
+          </range>
+        </ray>
+        <plugin name="${name}_controller" filename="libgazebo_ros_ray.so">
+          <topicName>${topic}</topicName>
+          <frameName>${parent_link}</frameName>
+        </plugin>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+
+  <!-- Example sonar sensors on the robot -->
+  <xacro:sonar_sensor
+    name="front_sonar"
+    parent_link="base_link"
+    topic="/sonar/front"
+    update_rate="10"
+    min_range="0.05"
+    max_range="5.0"
+    fov="0.52">  <!-- 30 degrees -->
+    <origin xyz="0.25 0 0.1" rpy="0 0 0"/>
+  </xacro:sonar_sensor>
+
+  <xacro:sonar_sensor
+    name="left_sonar"
+    parent_link="base_link"
+    topic="/sonar/left"
+    update_rate="10"
+    min_range="0.05"
+    max_range="5.0"
+    fov="0.52">  <!-- 30 degrees -->
+    <origin xyz="0.1 0.15 0.1" rpy="0 0 1.57"/>  <!-- Pointing left -->
+  </xacro:sonar_sensor>
+
+  <xacro:sonar_sensor
+    name="right_sonar"
+    parent_link="base_link"
+    topic="/sonar/right"
+    update_rate="10"
+    min_range="0.05"
+    max_range="5.0"
+    fov="0.52">  <!-- 30 degrees -->
+    <origin xyz="0.1 -0.15 0.1" rpy="0 0 -1.57"/>  <!-- Pointing right -->
+  </xacro:sonar_sensor>
+</robot>

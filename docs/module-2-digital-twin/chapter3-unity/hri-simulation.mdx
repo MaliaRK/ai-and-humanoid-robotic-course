@@ -1,0 +1,573 @@
+---
+title: 'Human-Robot Interaction Simulation'
+description: 'Simulating human-robot interaction scenarios in Unity for humanoid robotics'
+tags: ['unity', 'hri', 'interaction', 'simulation', 'robotics', 'humanoid']
+sidebar_position: 4
+---
+
+# Human-Robot Interaction Simulation
+
+Human-Robot Interaction (HRI) simulation is crucial for developing and testing humanoid robots that work alongside humans. Unity provides an excellent platform for creating realistic HRI scenarios, allowing researchers and developers to test interaction paradigms, safety protocols, and communication methods in a safe, controlled environment.
+
+## Understanding Human-Robot Interaction
+
+### Key HRI Concepts
+
+Human-Robot Interaction encompasses various forms of communication and collaboration between humans and robots:
+
+- **Physical Interaction**: Direct physical contact between humans and robots
+- **Social Interaction**: Communication through gestures, expressions, and behaviors
+- **Task Collaboration**: Joint task execution between humans and robots
+- **Spatial Interaction**: Navigation and movement in shared spaces
+
+### HRI in Unity
+
+Unity's capabilities make it particularly suitable for HRI simulation:
+
+- **Realistic Human Avatars**: Detailed 3D models with animation capabilities
+- **Advanced AI**: Sophisticated behavior and decision-making systems
+- **Immersive Environments**: Realistic scenes that mirror real-world contexts
+- **Multi-modal Interaction**: Support for various input and output modalities
+
+## Setting Up HRI Scenarios
+
+### Creating Human Avatars
+
+Human avatars in HRI simulations should be realistic and responsive:
+
+```csharp
+// Example: Basic human avatar controller
+using UnityEngine;
+using UnityEngine.AI;
+
+public class HumanAvatarController : MonoBehaviour
+{
+    [Header("Human Avatar Configuration")]
+    public float walkSpeed = 1.5f;
+    public float runSpeed = 3.0f;
+    public float turnSpeed = 120f;
+
+    [Header("Interaction Settings")]
+    public float interactionDistance = 2.0f;
+    public LayerMask interactionLayer;
+
+    private NavMeshAgent agent;
+    private Animator animator;
+    private Camera mainCamera;
+
+    void Start()
+    {
+        agent = GetComponent<NavMeshAgent>();
+        animator = GetComponent<Animator>();
+        mainCamera = Camera.main;
+
+        if (agent != null)
+        {
+            agent.speed = walkSpeed;
+        }
+    }
+
+    void Update()
+    {
+        HandleMovement();
+        CheckForInteractions();
+    }
+
+    void HandleMovement()
+    {
+        if (Input.GetMouseButtonDown(0))
+        {
+            Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
+            RaycastHit hit;
+
+            if (Physics.Raycast(ray, out hit, 100f, interactionLayer))
+            {
+                if (agent != null)
+                {
+                    agent.SetDestination(hit.point);
+                }
+            }
+        }
+    }
+
+    void CheckForInteractions()
+    {
+        Collider[] nearby = Physics.OverlapSphere(transform.position, interactionDistance);
+
+        foreach (Collider col in nearby)
+        {
+            if (col.CompareTag("Robot"))
+            {
+                // Handle human-robot interaction
+                OnHumanRobotInteraction(col.gameObject);
+                break;
+            }
+        }
+    }
+
+    void OnHumanRobotInteraction(GameObject robot)
+    {
+        // Trigger interaction-specific behaviors
+        if (animator != null)
+        {
+            animator.SetBool("IsInteracting", true);
+        }
+    }
+}
+```
+
+### Robot Interaction Systems
+
+Robots in HRI scenarios need to respond appropriately to human presence and actions:
+
+```csharp
+// Example: Robot HRI response system
+using UnityEngine;
+
+public class RobotHRIController : MonoBehaviour
+{
+    [Header("HRI Configuration")]
+    public float personalSpaceRadius = 1.0f;
+    public float comfortZoneRadius = 2.0f;
+    public float interactionThreshold = 1.5f;
+
+    [Header("Behavior Settings")]
+    public bool avoidHumans = true;
+    public bool followHumanGaze = true;
+    public bool respondToProximity = true;
+
+    private Transform humanTarget;
+    private float originalSpeed;
+
+    void Start()
+    {
+        // Find human avatars in the scene
+        GameObject[] humans = GameObject.FindGameObjectsWithTag("Human");
+        if (humans.Length > 0)
+        {
+            humanTarget = humans[0].transform; // Use the first human found
+        }
+    }
+
+    void Update()
+    {
+        if (humanTarget != null)
+        {
+            HandleHRIResponses();
+        }
+    }
+
+    void HandleHRIResponses()
+    {
+        float distanceToHuman = Vector3.Distance(transform.position, humanTarget.position);
+
+        if (avoidHumans && distanceToHuman < personalSpaceRadius)
+        {
+            AvoidHuman();
+        }
+        else if (respondToProximity && distanceToHuman < comfortZoneRadius)
+        {
+            RespondToProximity();
+        }
+        else if (distanceToHuman >= comfortZoneRadius)
+        {
+            // Normal behavior when human is at safe distance
+            ResumeNormalBehavior();
+        }
+
+        if (followHumanGaze)
+        {
+            FaceHuman();
+        }
+    }
+
+    void AvoidHuman()
+    {
+        Vector3 directionToHuman = (transform.position - humanTarget.position).normalized;
+        Vector3 avoidanceDirection = directionToHuman * Time.deltaTime * 2f;
+        transform.position += avoidanceDirection;
+    }
+
+    void RespondToProximity()
+    {
+        // Robot responds to human presence
+        // Could include turning to face human, slowing down, etc.
+    }
+
+    void ResumeNormalBehavior()
+    {
+        // Resume normal robot behavior
+    }
+
+    void FaceHuman()
+    {
+        Vector3 directionToHuman = humanTarget.position - transform.position;
+        directionToHuman.y = 0; // Keep rotation on horizontal plane
+        Quaternion targetRotation = Quaternion.LookRotation(directionToHuman);
+        transform.rotation = Quaternion.RotateTowards(
+            transform.rotation,
+            targetRotation,
+            90f * Time.deltaTime // Rotate at 90 degrees per second
+        );
+    }
+}
+```
+
+## HRI Simulation Environments
+
+### Environment Design Principles
+
+Effective HRI simulation environments should include:
+
+- **Realistic Contexts**: Environments that mirror real-world interaction scenarios
+- **Interactive Elements**: Objects that both humans and robots can manipulate
+- **Safety Boundaries**: Clear demarcations of safe and unsafe interaction zones
+- **Communication Channels**: Visual, auditory, and haptic feedback systems
+
+### Example HRI Scenarios
+
+#### Healthcare Environment
+- Hospital corridors with medical equipment
+- Patient rooms with beds and monitoring devices
+- Nurse stations for coordination scenarios
+
+#### Manufacturing Environment
+- Assembly lines with workstations
+- Safety barriers and restricted zones
+- Collaborative workspaces for human-robot teams
+
+#### Domestic Environment
+- Kitchen scenarios with appliances
+- Living room interactions
+- Navigation through doorways and furniture
+
+## Interaction Modalities
+
+### Visual Communication
+
+Visual communication in HRI includes:
+
+- **Gaze Direction**: Where the robot looks indicates attention and intent
+- **Body Language**: Posture and movement patterns convey meaning
+- **LED Indicators**: Visual status indicators for robot state
+- **Projected Interfaces**: AR-style interfaces projected into space
+
+```csharp
+// Example: Robot gaze control system
+using UnityEngine;
+
+public class RobotGazeController : MonoBehaviour
+{
+    [Header("Gaze Configuration")]
+    public Transform headTransform;
+    public Transform eyesTransform;
+    public float gazeSpeed = 5.0f;
+    public float maxGazeAngle = 30.0f;
+
+    [Header("Target Settings")]
+    public Transform gazeTarget;
+    public bool autoTrackClosestHuman = true;
+
+    private Vector3 defaultGazeDirection;
+
+    void Start()
+    {
+        defaultGazeDirection = headTransform.forward;
+    }
+
+    void Update()
+    {
+        if (autoTrackClosestHuman && gazeTarget == null)
+        {
+            FindClosestHuman();
+        }
+
+        UpdateGaze();
+    }
+
+    void FindClosestHuman()
+    {
+        GameObject[] humans = GameObject.FindGameObjectsWithTag("Human");
+        float closestDistance = Mathf.Infinity;
+
+        foreach (GameObject human in humans)
+        {
+            float distance = Vector3.Distance(transform.position, human.transform.position);
+            if (distance < closestDistance)
+            {
+                closestDistance = distance;
+                gazeTarget = human.transform;
+            }
+        }
+    }
+
+    void UpdateGaze()
+    {
+        if (gazeTarget != null)
+        {
+            Vector3 targetDirection = (gazeTarget.position - eyesTransform.position).normalized;
+
+            // Limit gaze angle to prevent unrealistic eye movements
+            targetDirection = Vector3.ClampMagnitude(targetDirection, maxGazeAngle);
+
+            Quaternion targetRotation = Quaternion.LookRotation(targetDirection);
+            eyesTransform.rotation = Quaternion.Slerp(
+                eyesTransform.rotation,
+                targetRotation,
+                gazeSpeed * Time.deltaTime
+            );
+        }
+        else
+        {
+            // Return to default gaze direction
+            eyesTransform.rotation = Quaternion.Slerp(
+                eyesTransform.rotation,
+                Quaternion.LookRotation(defaultGazeDirection),
+                gazeSpeed * Time.deltaTime * 0.5f
+            );
+        }
+    }
+}
+```
+
+### Audio Communication
+
+Audio communication systems for HRI:
+
+- **Speech Synthesis**: Text-to-speech for robot communication
+- **Speech Recognition**: Voice command processing
+- **Audio Cues**: Beeps, tones, and other audio feedback
+- **Spatial Audio**: 3D audio positioning for directional awareness
+
+### Haptic Feedback
+
+Haptic systems in Unity HRI simulations:
+
+- **Force Feedback**: Simulated resistance and tactile sensations
+- **Vibration Patterns**: Different patterns for various interaction types
+- **Grasp Simulation**: Feedback during object manipulation
+
+## Safety Considerations
+
+### Safety Boundaries
+
+Implement safety systems to prevent unsafe interactions:
+
+```csharp
+// Example: Safety boundary system
+using UnityEngine;
+
+public class HRISafetySystem : MonoBehaviour
+{
+    [Header("Safety Configuration")]
+    public float safeDistance = 1.0f;
+    public float warningDistance = 1.5f;
+    public float dangerDistance = 0.5f;
+
+    [Header("Safety Actions")]
+    public bool enableSafetyShutdown = true;
+    public float safetyCooldown = 2.0f;
+
+    private float lastSafetyViolation = 0f;
+    private bool isSafe = true;
+
+    void Update()
+    {
+        CheckSafetyBoundaries();
+    }
+
+    void CheckSafetyBoundaries()
+    {
+        Collider[] nearbyObjects = Physics.OverlapSphere(transform.position, warningDistance);
+
+        foreach (Collider col in nearbyObjects)
+        {
+            if (col.CompareTag("Human"))
+            {
+                float distance = Vector3.Distance(transform.position, col.transform.position);
+
+                if (distance < dangerDistance)
+                {
+                    TriggerDangerResponse();
+                }
+                else if (distance < safeDistance)
+                {
+                    TriggerWarningResponse();
+                }
+
+                return; // Only check the closest human
+            }
+        }
+
+        // If no humans are nearby, reset safety state
+        isSafe = true;
+    }
+
+    void TriggerDangerResponse()
+    {
+        if (Time.time - lastSafetyViolation > safetyCooldown)
+        {
+            Debug.LogWarning("DANGER: Human too close to robot!");
+
+            if (enableSafetyShutdown)
+            {
+                // Implement safety shutdown procedures
+                SafetyShutdown();
+            }
+
+            lastSafetyViolation = Time.time;
+            isSafe = false;
+        }
+    }
+
+    void TriggerWarningResponse()
+    {
+        if (Time.time - lastSafetyViolation > safetyCooldown)
+        {
+            Debug.LogWarning("WARNING: Human approaching robot!");
+            // Implement warning procedures
+            lastSafetyViolation = Time.time;
+        }
+    }
+
+    void SafetyShutdown()
+    {
+        // Stop robot movement
+        // Trigger safety protocols
+        // Log safety event
+    }
+}
+```
+
+### Emergency Protocols
+
+Implement emergency stop and recovery systems:
+
+- **Emergency Stop**: Immediate halt of all robot motion
+- **Safe Positioning**: Move to predetermined safe positions
+- **Communication**: Alert humans and systems of emergency
+- **Recovery**: Safe restart procedures after emergency
+
+## HRI Simulation Best Practices
+
+### Realism vs. Safety
+
+Balance realistic interaction with safety:
+
+- **Controlled Realism**: Realistic behaviors within safe parameters
+- **Predictable Responses**: Humans can anticipate robot behavior
+- **Clear Communication**: Robot intentions are clearly communicated
+- **Graduated Complexity**: Start with simple interactions, increase complexity
+
+### Validation and Testing
+
+Validate HRI scenarios through:
+
+- **Expert Review**: Domain experts evaluate interaction quality
+- **User Studies**: Real humans interact with simulated robots
+- **Safety Audits**: Regular checks of safety systems
+- **Performance Monitoring**: Track interaction metrics and outcomes
+
+## Integration with ROS/ROS 2
+
+### Communication Protocols
+
+For HRI scenarios involving real robots:
+
+```csharp
+// Example: ROS communication for HRI
+using UnityEngine;
+using Unity.Robotics.ROSTCPConnector;
+using Unity.Robotics.ROSTCPConnector.MessageTypes.Std_msgs;
+
+public class HRIROSCommunicator : MonoBehaviour
+{
+    [Header("ROS Configuration")]
+    public string hriStatusTopic = "/hri_status";
+    public string humanTrackingTopic = "/human_tracking";
+    public string interactionEventTopic = "/interaction_events";
+
+    private ROSConnection ros;
+
+    void Start()
+    {
+        ros = ROSConnection.GetOrCreateInstance();
+
+        // Register publishers and subscribers
+        ros.RegisterPublisher<StringMsg>(hriStatusTopic);
+        ros.RegisterPublisher<StringMsg>(interactionEventTopic);
+    }
+
+    void Update()
+    {
+        // Publish HRI status
+        PublishHRIStatus();
+    }
+
+    void PublishHRIStatus()
+    {
+        StringMsg statusMsg = new StringMsg();
+        statusMsg.data = "Active interaction with human";
+        ros.Publish(hriStatusTopic, statusMsg);
+    }
+
+    public void PublishInteractionEvent(string eventType, string details)
+    {
+        StringMsg eventMsg = new StringMsg();
+        eventMsg.data = $"{{\"type\":\"{eventType}\",\"details\":\"{details}\",\"timestamp\":{Time.time}}}";
+        ros.Publish(interactionEventTopic, eventMsg);
+    }
+}
+```
+
+### Data Synchronization
+
+Synchronize data between simulation and real systems:
+
+- **Pose Synchronization**: Keep virtual and real robot poses aligned
+- **Sensor Data**: Feed real sensor data into simulation
+- **Behavior Coordination**: Coordinate behaviors between virtual and real systems
+
+## Performance Optimization
+
+### Efficient HRI Systems
+
+Optimize HRI systems for real-time performance:
+
+- **LOD Systems**: Use lower detail models when humans are distant
+- **Occlusion Culling**: Don't process interactions with occluded objects
+- **Spatial Partitioning**: Only check interactions within relevant areas
+- **Asynchronous Processing**: Handle complex computations off the main thread
+
+### Resource Management
+
+Manage resources effectively:
+
+- **Object Pooling**: Reuse interaction objects instead of creating/destroying
+- **Texture Streaming**: Load textures as needed for large environments
+- **Animation Compression**: Optimize animation data for performance
+
+## Testing and Evaluation
+
+### HRI Metrics
+
+Track relevant metrics for HRI scenarios:
+
+- **Interaction Frequency**: How often humans and robots interact
+- **Interaction Duration**: Length of interaction sessions
+- **Safety Incidents**: Number and severity of safety events
+- **Task Success Rate**: Effectiveness of human-robot collaboration
+- **User Satisfaction**: Subjective measures of interaction quality
+
+### Scenario Testing
+
+Test various HRI scenarios:
+
+- **Routine Interactions**: Daily operations and tasks
+- **Emergency Scenarios**: Safety-related situations
+- **Stress Testing**: High-frequency interaction scenarios
+- **Edge Cases**: Unusual or unexpected interactions
+
+## Next Steps
+
+In the following section, we'll explore how to create C# scripts for Unity-ROS communication and high-fidelity environment examples for HRI scenarios.

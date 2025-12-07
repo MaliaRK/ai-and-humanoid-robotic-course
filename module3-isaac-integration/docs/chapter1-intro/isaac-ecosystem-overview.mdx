@@ -1,0 +1,114 @@
+---
+title: "Isaac Ecosystem Overview"
+description: "Comprehensive guide to NVIDIA Isaac platform components and their roles in humanoid robotics"
+sidebar_position: 2
+---
+
+# Isaac Ecosystem Overview
+
+## Introduction
+
+The NVIDIA Isaac ecosystem is a comprehensive platform for developing, simulating, and deploying AI-powered robots. It provides tools for simulation, perception, navigation, manipulation, and AI training, all optimized for NVIDIA's GPU-accelerated computing.
+
+## Core Components
+
+### Isaac Sim
+- **Purpose**: Photorealistic simulation environment
+- **Features**: USD-based scenes, PhysX physics engine, sensor simulation
+- **Use Cases**: Training data generation, algorithm validation, testing
+- **Benefits**: Safe environment for development, domain randomization
+
+### Isaac ROS
+- **Purpose**: GPU-accelerated perception and navigation
+- **Features**: Isaac ROS GEMs (GPU-accelerated modules)
+- **Use Cases**: Visual SLAM, object detection, depth estimation
+- **Benefits**: Real-time performance, hardware acceleration
+
+### Isaac Apps
+- **Purpose**: Pre-built applications for common robot tasks
+- **Features**: Navigation, manipulation, perception applications
+- **Use Cases**: Rapid prototyping, reference implementations
+- **Benefits**: Proven solutions, starting point for customization
+
+### Isaac Lab
+- **Purpose**: Robot learning framework
+- **Features**: Reinforcement learning environments, sim-to-real transfer
+- **Use Cases**: Locomotion training, manipulation skills
+- **Benefits**: Accelerated skill development, transfer to real robots
+
+## Isaac Sim Architecture
+
+Isaac Sim is built on NVIDIA's Omniverse platform and includes:
+
+- **USD Scene Description**: Universal Scene Description for 3D scenes
+- **Omniverse Kit**: Extensible framework for simulation applications
+- **PhysX Integration**: High-fidelity physics simulation
+- **RTX Rendering**: Photorealistic rendering capabilities
+- **Sensor Simulation**: Accurate simulation of cameras, LiDAR, IMU, etc.
+
+## Isaac ROS GEMs
+
+Isaac ROS provides GPU-accelerated modules including:
+
+- **Visual SLAM**: Real-time localization and mapping
+- **AprilTag Detection**: Marker-based localization
+- **Hawk and Stereo DNN**: Deep learning inference
+- **Image Pipelines**: Image rectification and processing
+- **Message Multiplexers**: Sensor data handling
+
+## Integration with ROS 2
+
+The Isaac ecosystem seamlessly integrates with ROS 2:
+
+- **Bridge Components**: Connect simulation to real robots
+- **Standard Message Types**: Compatible with ROS 2 ecosystem
+- **Launch Files**: Standard ROS 2 launch system
+- **Parameter Management**: Standard ROS 2 parameter system
+
+## Code Example
+
+```python
+# Example: Isaac ROS node integration
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import Image
+from isaac_ros_visual_slam_msgs.msg import VisualSlam
+
+class IsaacIntegrationNode(Node):
+    def __init__(self):
+        super().__init__('isaac_integration_node')
+
+        # Subscribe to camera images
+        self.subscription = self.create_subscription(
+            Image,
+            '/camera/image_raw',
+            self.image_callback,
+            10
+        )
+
+        # Publish SLAM data
+        self.slam_publisher = self.create_publisher(
+            VisualSlam,
+            '/visual_slam/pose',
+            10
+        )
+
+    def image_callback(self, msg):
+        # Process image through Isaac ROS pipeline
+        # This would typically be connected to Isaac ROS GEMs
+        pass
+```
+
+## Benefits for Humanoid Robotics
+
+The Isaac ecosystem provides specific advantages for humanoid robots:
+
+- **Realistic Simulation**: Accurate physics for bipedal locomotion
+- **GPU Acceleration**: Real-time perception for dynamic balancing
+- **Sensor Fusion**: Integration of multiple sensor modalities
+- **AI Training**: Framework for locomotion and behavior learning
+- **Sim-to-Real Transfer**: Tools for deploying simulation-trained models
+
+## Summary
+
+The Isaac ecosystem provides a comprehensive platform for humanoid robot development, from simulation and training to real-world deployment. Its GPU-accelerated components and integration with ROS 2 make it particularly suitable for the computational demands of humanoid robotics.

@@ -1,0 +1,107 @@
+# ROS 2 Bridge Configuration for Isaac Sim
+# This configuration defines the mapping between Isaac Sim and ROS 2 topics/services
+
+bridge_config:
+  # Simulation parameters
+  use_sim_time: true
+  publish_frequency: 60.0  # Hz
+
+  # Robot description
+  robot_description: "humanoid_robot"
+  robot_name: "humanoid"
+
+  # Topic mappings
+  topics:
+    # Sensor topics
+    - isaac_topic: "/isaac/sim/camera/rgb"
+      ros_topic: "/camera/image_raw"
+      isaac_type: "isaac_ros_messages/IsaacCamera"
+      ros_type: "sensor_msgs/Image"
+      qos:
+        history: "keep_last"
+        depth: 5
+        reliability: "reliable"
+        durability: "volatile"
+
+    - isaac_topic: "/isaac/sim/imu"
+      ros_topic: "/imu/data"
+      isaac_type: "isaac_ros_messages/IsaacImu"
+      ros_type: "sensor_msgs/Imu"
+      qos:
+        history: "keep_last"
+        depth: 10
+        reliability: "reliable"
+        durability: "volatile"
+
+    - isaac_topic: "/isaac/sim/joint_states"
+      ros_topic: "/joint_states"
+      isaac_type: "isaac_ros_messages/IsaacJointState"
+      ros_type: "sensor_msgs/JointState"
+      qos:
+        history: "keep_last"
+        depth: 1
+        reliability: "reliable"
+        durability: "transient_local"
+
+    # Control topics
+    - isaac_topic: "/isaac/sim/cmd_vel"
+      ros_topic: "/cmd_vel"
+      isaac_type: "isaac_ros_messages/IsaacTwist"
+      ros_type: "geometry_msgs/Twist"
+      qos:
+        history: "keep_last"
+        depth: 1
+        reliability: "reliable"
+        durability: "volatile"
+
+    - isaac_topic: "/isaac/sim/odom"
+      ros_topic: "/odom"
+      isaac_type: "isaac_ros_messages/IsaacOdometry"
+      ros_type: "nav_msgs/Odometry"
+      qos:
+        history: "keep_last"
+        depth: 10
+        reliability: "reliable"
+        durability: "volatile"
+
+  # Service mappings
+  services:
+    - isaac_service: "/isaac/sim/reset"
+      ros_service: "/reset_simulation"
+      isaac_type: "isaac_ros_messages/IsaacReset"
+      ros_type: "std_srvs/Empty"
+
+    - isaac_service: "/isaac/sim/pause"
+      ros_service: "/pause_simulation"
+      isaac_type: "isaac_ros_messages/IsaacPause"
+      ros_type: "std_srvs/SetBool"
+
+  # Action mappings
+  actions:
+    - isaac_action: "/isaac/sim/navigation"
+      ros_action: "/navigate_to_pose"
+      isaac_type: "isaac_ros_messages/IsaacNavigateAction"
+      ros_type: "nav2_msgs/NavigateToPose"
+
+  # TF frames
+  tf_frames:
+    world_frame: "world"
+    robot_base_frame: "base_link"
+    camera_frame: "camera_link"
+    imu_frame: "imu_link"
+
+  # Parameter mappings
+  parameters:
+    # Simulation time scaling
+    - name: "time_scaling"
+      default_value: 1.0
+      description: "Time scaling factor for simulation (1.0 = real-time)"
+
+    # Physics parameters
+    - name: "physics_substeps"
+      default_value: 8
+      description: "Number of physics substeps per simulation step"
+
+    - name: "solver_iterations"
+      default_value: 8
+      description: "Number of solver iterations for physics"

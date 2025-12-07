@@ -1,0 +1,43 @@
+# Isaac Integration Module Requirements
+
+# Core ROS 2 Dependencies
+rclpy>=3.0.0
+ros2-interfaces>=1.0.0
+geometry-msgs>=1.0.0
+nav-msgs>=1.0.0
+sensor-msgs>=1.0.0
+std-msgs>=1.0.0
+tf2-ros>=0.18.0
+
+# Isaac ROS Dependencies
+isaac-ros-apriltag>=2.0.0
+isaac-ros-visual-slam>=2.0.0
+isaac-ros-pointcloud-utils>=2.0.0
+isaac-ros-common>=2.0.0
+isaac-ros-nitros>=2.0.0
+
+# Navigation Dependencies
+nav2-bringup>=1.0.0
+nav2-ros2-controllers>=1.0.0
+nav2-map-server>=1.0.0
+nav2-amcl>=1.0.0
+nav2-planner>=1.0.0
+nav2-behaviors>=1.0.0
+nav2-smoother>=1.0.0
+
+# Computer Vision
+opencv-python>=4.5.0
+cv-bridge>=3.0.0
+numpy>=1.21.0
+scipy>=1.7.0
+
+# GPU Processing (if available)
+cupy-cuda11x>=10.0.0  # Use appropriate CUDA version
+
+# Visualization and Debugging
+matplotlib>=3.3.0
+plotly>=5.0.0
+
+# Utilities
+message-filters>=4.0.0
+transforms3d>=0.4.0

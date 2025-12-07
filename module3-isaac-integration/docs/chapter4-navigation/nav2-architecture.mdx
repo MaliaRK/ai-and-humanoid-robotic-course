@@ -1,0 +1,748 @@
+---
+title: "Nav2 Architecture for Humanoid Robots"
+description: "Understanding the Nav2 navigation stack architecture adapted for humanoid robotics"
+sidebar_position: 1
+---
+
+# Nav2 Architecture for Humanoid Robots
+
+## Introduction
+
+Navigation2 (Nav2) is the state-of-the-art navigation stack for ROS 2, providing path planning, localization, and motion control capabilities for mobile robots. For humanoid robots, Nav2 requires specific adaptations to handle the unique challenges of bipedal locomotion, balance constraints, and human-scale environments.
+
+## Nav2 System Architecture
+
+### Core Components
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   BT Navigator  │    │  Controller     │    │   Planner       │
+│                 │    │                 │    │                 │
+│ • Behavior Tree │    │ • Pure Pursuit  │    │ • Global Planner│
+│ • Recovery      │◄──►│ • MPC           │◄──►│ • Local Planner │
+│ • Task Manager  │    │ • PID Control   │    │ • Grid Planner  │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         ▲                       ▲                       ▲
+         │                       │                       │
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Local Costmap │    │  Global Costmap │    │   Map Server    │
+│                 │    │                 │    │                 │
+│ • Obstacle Layer│    │ • Static Layer  │    │ • Map Loading   │
+│ • Inflation     │    │ • Obstacle Layer│    │ • Map Serving   │
+│ • Voxel Layer   │    │ • Inflation     │    │ • Map Updates   │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+### Humanoid-Specific Modifications
+- **Balance-Aware Controllers**: Account for bipedal balance constraints
+- **Gait-Adapted Planners**: Plan trajectories compatible with walking gait
+- **Stability Metrics**: Include balance and stability in path evaluation
+- **Human-Scale Navigation**: Adapt for human-sized environments
+
+## Nav2 Core Architecture
+
+### Navigator Component
+The navigator orchestrates the navigation process using behavior trees:
+
+```python
+# Example: Humanoid-optimized navigator configuration
+import rclpy
+from rclpy.node import Node
+from nav2_bt_navigator.navigato_r import Navigator
+from rclpy.qos import QoSProfile
+from geometry_msgs.msg import PoseStamped
+from nav_msgs.msg import Path
+
+class HumanoidNavigator(Navigator):
+    def __init__(self):
+        super().__init__('humanoid_navigator')
+
+        # Initialize humanoid-specific parameters
+        self.declare_parameter('balance_constraint_weight', 0.8)
+        self.declare_parameter('gait_constraint_weight', 0.6)
+        self.declare_parameter('stability_threshold', 0.7)
+
+        # Humanoid-specific recovery behaviors
+        self.balance_recovery_enabled = True
+        self.stability_check_enabled = True
+
+    def execute_navigate_to_pose(self, initial_pose, goal_pose):
+        """Execute navigation with humanoid-specific constraints"""
+        # Check initial stability
+        if not self.is_robot_stable():
+            self.get_logger().warn("Robot is not stable, attempting recovery")
+            self.perform_balance_recovery()
+
+        # Plan path with humanoid constraints
+        path = self.plan_path_with_constraints(goal_pose)
+
+        # Execute with balance-aware control
+        result = self.execute_path_with_balance_control(path)
+
+        return result
+
+    def plan_path_with_constraints(self, goal_pose):
+        """Plan path considering humanoid-specific constraints"""
+        # Get current costmaps with humanoid-specific layers
+        local_costmap = self.get_local_costmap()
+        global_costmap = self.get_global_costmap()
+
+        # Modify costmap for humanoid-specific constraints
+        self.add_balance_constraints_to_costmap(local_costmap)
+        self.add_gait_constraints_to_costmap(global_costmap)
+
+        # Plan path using modified costmaps
+        path = self.call_global_planner(goal_pose)
+
+        # Post-process path for humanoid compatibility
+        humanoid_path = self.adapt_path_for_humanoid(path)
+
+        return humanoid_path
+
+    def add_balance_constraints_to_costmap(self, costmap):
+        """Add balance-related costs to costmap"""
+        # Areas that could cause balance issues (stairs, slopes, narrow passages)
+        # Increase cost in these areas
+        pass
+
+    def add_gait_constraints_to_costmap(self, costmap):
+        """Add gait-related constraints to costmap"""
+        # Ensure path allows for stable gait patterns
+        # Avoid areas requiring awkward stepping
+        pass
+
+    def adapt_path_for_humanoid(self, path):
+        """Modify path to be compatible with humanoid locomotion"""
+        # Smooth path for stable walking
+        smoothed_path = self.smooth_path_for_gait(path)
+
+        # Add intermediate waypoints for stability
+        stable_path = self.add_stability_waypoints(smoothed_path)
+
+        return stable_path
+```
+
+## Behavior Tree Architecture
+
+### Humanoid-Specific Behavior Tree
+```xml
+<!-- Example: Humanoid-optimized behavior tree -->
+<root main_tree_to_execute="MainTree">
+    <BehaviorTree ID="MainTree">
+        <Sequence name="NavigateToPose">
+            <!-- Check robot stability before navigation -->
+            <CheckRobotStability />
+
+            <!-- Calculate path with humanoid constraints -->
+            <ComputePathToPose goal="{goal}" path="{path}" planner_id="humanoid_global_planner"/>
+
+            <!-- Smooth path for humanoid gait -->
+            <SmoothPath input_path="{path}" output_path="{smoothed_path}" />
+
+            <!-- Follow the path with balance-aware control -->
+            <FollowPath path="{smoothed_path}" controller_id="balance_aware_controller" />
+        </Sequence>
+    </BehaviorTree>
+
+    <BehaviorTree ID="RecoveryNode">
+        <ReactiveSequence name="RecoveryFallback">
+            <ClearEntireCostmap name="ClearLocalCostmap-1" service_name="local_costmap/clear_entirely_local_costmap"/>
+            <ClearEntireCostmap name="ClearGlobalCostmap-1" service_name="global_costmap/clear_entirely_global_costmap"/>
+            <BackUp backup_dist="0.15" backup_speed="0.025" />
+            <Spin spin_dist="1.57" time_allowance="10"/>
+            <Wait wait_duration="5"/>
+            <BalanceRecovery />
+        </ReactiveSequence>
+    </BehaviorTree>
+</root>
+```
+
+### Custom Behavior Tree Nodes
+```python
+# Example: Humanoid-specific BT node for balance recovery
+from geometry_msgs.msg import Twist
+from nav2_behavior_tree.bt_action import ActionBT
+import py_trees
+
+class BalanceRecovery(ActionBT):
+    def __init__(self, name, recovery_node):
+        super().__init__(name, recovery_node, 'BalanceRecoveryAction')
+
+    def create_goal(self):
+        """Create goal for balance recovery action"""
+        from isaac_ros_messages.action import BalanceRecovery
+
+        goal = BalanceRecovery.Goal()
+        goal.recovery_type = 'stance_adjustment'
+        goal.max_recovery_time = 5.0
+        goal.stability_threshold = 0.8
+
+        return goal
+
+    def get_feedback(self):
+        """Process feedback from balance recovery"""
+        feedback = self._get_action_client_result()
+        if feedback:
+            self.feedback_message = f'Balance recovery progress: {feedback.progress}'
+        return feedback
+```
+
+## Controller Architecture
+
+### Humanoid-Specific Controllers
+```python
+# Example: Balance-aware controller for humanoid robots
+from nav2_core.controller import Controller
+from geometry_msgs.msg import PoseStamped, Twist
+import numpy as np
+
+class BalanceAwareController(Controller):
+    def __init__(self):
+        self.controller_frequency = 20.0  # Hz
+        self.linear_vel_max = 0.3  # m/s (slower for stability)
+        self.angular_vel_max = 0.5  # rad/s
+        self.balance_threshold = 0.1  # Stability threshold
+
+    def setPlan(self, path):
+        """Set the path for the controller"""
+        self.path = path
+        self.current_waypoint_index = 0
+
+    def computeVelocityCommands(self, pose: PoseStamped, velocity: Twist, goal_checker):
+        """Compute velocity commands with balance awareness"""
+        # Check current balance state
+        balance_state = self.get_current_balance_state()
+
+        if not self.is_balanced(balance_state):
+            # Priority: recover balance before navigation
+            return self.balance_recovery_commands(balance_state)
+
+        # Compute normal navigation commands
+        cmd_vel = self.compute_normal_commands(pose, velocity, goal_checker)
+
+        # Apply balance constraints to commands
+        balanced_cmd_vel = self.apply_balance_constraints(cmd_vel, balance_state)
+
+        return balanced_cmd_vel
+
+    def get_current_balance_state(self):
+        """Get current balance state from sensors"""
+        # This would integrate with IMU, joint sensors, etc.
+        # to determine current balance state
+        pass
+
+    def is_balanced(self, balance_state):
+        """Check if robot is within balance limits"""
+        return balance_state.stability_metric > self.balance_threshold
+
+    def balance_recovery_commands(self, balance_state):
+        """Generate commands to recover balance"""
+        cmd_vel = Twist()
+
+        # Adjust commands to improve balance
+        cmd_vel.linear.x = 0.0  # Stop forward motion
+        cmd_vel.angular.z = balance_state.correction_needed  # Apply corrective rotation
+
+        return cmd_vel
+
+    def apply_balance_constraints(self, cmd_vel, balance_state):
+        """Apply balance constraints to navigation commands"""
+        # Reduce speed if near balance limits
+        stability_factor = min(1.0, balance_state.stability_metric / 0.5)
+
+        cmd_vel.linear.x *= stability_factor
+        cmd_vel.angular.z *= stability_factor
+
+        return cmd_vel
+```
+
+## Planner Architecture
+
+### Humanoid-Specific Path Planning
+```python
+# Example: Gait-aware path planner
+from nav2_core.planner import GlobalPlanner
+from nav_msgs.msg import Path
+from geometry_msgs.msg import PoseStamped
+import numpy as np
+
+class GaitAwarePlanner(GlobalPlanner):
+    def __init__(self):
+        self.min_step_length = 0.2  # Minimum step length for stability
+        self.max_step_length = 0.6  # Maximum step length
+        self.step_height = 0.1      # Typical step height
+        self.gait_pattern = 'double_support'  # Default gait pattern
+
+    def createPlan(self, start: PoseStamped, goal: PoseStamped, planner_id: str = ""):
+        """Create plan with humanoid gait constraints"""
+        # Plan initial path using standard algorithm
+        raw_path = self.plan_standard_path(start, goal)
+
+        # Adapt path for humanoid gait
+        gait_adapted_path = self.adapt_path_for_gait(raw_path)
+
+        # Verify path feasibility for humanoid locomotion
+        feasible_path = self.verify_gait_feasibility(gait_adapted_path)
+
+        return feasible_path
+
+    def adapt_path_for_gait(self, raw_path):
+        """Adapt path points to be compatible with humanoid gait"""
+        adapted_path = Path()
+        adapted_path.header = raw_path.header
+
+        # Process path to ensure step constraints are met
+        for i, pose in enumerate(raw_path.poses):
+            if i == 0:
+                # Always include start pose
+                adapted_path.poses.append(pose)
+            else:
+                # Check if this pose is compatible with gait constraints
+                prev_pose = adapted_path.poses[-1]
+                distance = self.calculate_distance(prev_pose.pose, pose.pose)
+
+                if distance >= self.min_step_length:
+                    # Check if distance is too large and needs intermediate points
+                    if distance > self.max_step_length:
+                        # Add intermediate poses
+                        intermediate_poses = self.generate_intermediate_poses(
+                            prev_pose, pose, self.max_step_length
+                        )
+                        adapted_path.poses.extend(intermediate_poses)
+
+                    adapted_path.poses.append(pose)
+
+        return adapted_path
+
+    def verify_gait_feasibility(self, path):
+        """Verify that the path is feasible for humanoid gait"""
+        # Check for sharp turns that might be difficult for bipedal robots
+        # Check for obstacles at foot level
+        # Check for stability during path execution
+        pass
+
+    def generate_intermediate_poses(self, start_pose, end_pose, max_step_length):
+        """Generate intermediate poses to satisfy step length constraints"""
+        # Calculate number of intermediate poses needed
+        distance = self.calculate_distance(start_pose.pose, end_pose.pose)
+        num_steps = int(distance / max_step_length)
+
+        intermediate_poses = []
+
+        for i in range(1, num_steps):
+            ratio = i / num_steps
+
+            # Interpolate position
+            interp_pose = PoseStamped()
+            interp_pose.header = start_pose.header
+
+            start_pos = start_pose.pose.position
+            end_pos = end_pose.pose.position
+
+            interp_pose.pose.position.x = start_pos.x + ratio * (end_pos.x - start_pos.x)
+            interp_pose.pose.position.y = start_pos.y + ratio * (end_pos.y - start_pos.y)
+            interp_pose.pose.position.z = start_pos.z + ratio * (end_pos.z - start_pos.z)
+
+            # Interpolate orientation
+            # (Simplified - in practice, use slerp for quaternions)
+            interp_pose.pose.orientation = self.interpolate_orientation(
+                start_pose.pose.orientation, end_pose.pose.orientation, ratio
+            )
+
+            intermediate_poses.append(interp_pose)
+
+        return intermediate_poses
+```
+
+## Costmap Architecture
+
+### Humanoid-Specific Costmap Layers
+```python
+# Example: Humanoid-specific costmap layer
+from nav2_costmap_2d.layers import Layer
+from nav2_costmap_2d import Costmap2D
+from geometry_msgs.msg import Point
+import numpy as np
+
+class BalanceConstraintLayer(Layer):
+    def __init__(self, name, costmap):
+        super().__init__(name)
+        self.costmap = costmap
+        self.enabled = True
+
+    def onInitialize(self):
+        """Initialize the layer"""
+        self.layered_costmap = self.getLayeredCostmap()
+        self.matchSize()
+
+    def updateBounds(self, robot_x, robot_y, robot_yaw, min_x, min_y, max_x, max_y):
+        """Update bounds for the layer"""
+        if not self.enabled:
+            return
+
+        # Expand bounds to account for balance constraints
+        expansion = 0.5  # meters
+        min_x -= expansion
+        min_y -= expansion
+        max_x += expansion
+        max_y += expansion
+
+    def updateCosts(self, master_grid, min_i, min_j, max_i, max_j):
+        """Update costs in the master grid"""
+        if not self.enabled:
+            return
+
+        # Add costs based on terrain characteristics that affect balance
+        for i in range(min_i, max_i):
+            for j in range(min_j, max_j):
+                world_x, world_y = self.costmap.mapToWorld(i, j)
+
+                # Check if terrain affects balance
+                balance_cost = self.calculate_balance_cost(world_x, world_y)
+                current_cost = master_grid.getCost(i, j)
+
+                # Combine costs (taking maximum)
+                new_cost = max(current_cost, balance_cost)
+                master_grid.setCost(i, j, new_cost)
+
+    def calculate_balance_cost(self, x, y):
+        """Calculate cost based on balance considerations"""
+        # Higher cost for:
+        # - Sloped terrain
+        # - Narrow passages
+        # - Uneven surfaces
+        # - Obstacles at foot level
+        # - Areas requiring awkward stepping
+
+        # Example: simple slope detection
+        slope_cost = self.estimate_slope_cost(x, y)
+
+        # Example: narrow passage detection
+        passage_cost = self.check_narrow_passage_cost(x, y)
+
+        # Combine costs
+        total_cost = max(slope_cost, passage_cost)
+
+        return total_cost
+
+    def estimate_slope_cost(self, x, y):
+        """Estimate cost based on terrain slope"""
+        # This would use elevation data to estimate slope
+        # Higher slope = higher cost for humanoid navigation
+        slope = self.get_terrain_slope(x, y)
+        normalized_slope = min(1.0, slope / 0.3)  # Normalize to 0-1 based on max acceptable slope
+        return int(normalized_slope * 200)  # Scale to costmap range
+
+    def check_narrow_passage_cost(self, x, y):
+        """Check if location is in a narrow passage"""
+        # Check nearby areas for obstacles
+        clearance = self.calculate_local_clearance(x, y)
+        if clearance < 0.6:  # Less than 60cm clearance
+            return 200  # Very high cost
+        elif clearance < 0.8:  # Less than 80cm clearance
+            return 100  # High cost
+        else:
+            return 0  # No additional cost
+```
+
+## Integration with Isaac ROS
+
+### Isaac ROS Navigation Components
+- **Isaac ROS Nav2 Bridge**: Seamless integration with Isaac Sim
+- **GPU-Accelerated Path Planning**: Accelerated planning algorithms
+- **Real-time Trajectory Optimization**: GPU-accelerated trajectory generation
+- **Sensor Fusion Integration**: Combined perception and navigation
+
+### Example Integration
+```python
+# Example: Isaac ROS Nav2 integration
+import rclpy
+from rclpy.node import Node
+from nav2_msgs.action import NavigateToPose
+from geometry_msgs.msg import PoseStamped
+from action_msgs.msg import GoalStatus
+
+class IsaacROSNav2Integrator(Node):
+    def __init__(self):
+        super().__init__('isaac_ros_nav2_integrator')
+
+        # Create action client for Nav2
+        self.nav_to_pose_client = ActionClient(
+            self, NavigateToPose, 'navigate_to_pose'
+        )
+
+        # Subscribe to Isaac Sim localization
+        self.localization_sub = self.create_subscription(
+            PoseWithCovarianceStamped,
+            '/isaac/localization/pose',
+            self.localization_callback,
+            10
+        )
+
+        # Subscribe to Isaac Sim perception
+        self.perception_sub = self.create_subscription(
+            OccupancyGrid,
+            '/isaac/perception/map',
+            self.perception_callback,
+            10
+        )
+
+    def navigate_with_isaac_integration(self, goal_pose):
+        """Navigate using Isaac Sim integration"""
+        # Ensure Isaac Sim localization is available
+        if not self.is_localization_valid():
+            self.get_logger().error("Invalid localization from Isaac Sim")
+            return False
+
+        # Send navigation goal to Nav2
+        goal_msg = NavigateToPose.Goal()
+        goal_msg.pose = goal_pose
+
+        # Wait for action server
+        self.nav_to_pose_client.wait_for_server()
+
+        # Send goal
+        future = self.nav_to_pose_client.send_goal_async(goal_msg)
+        future.add_done_callback(self.navigation_done_callback)
+
+        return True
+
+    def localization_callback(self, msg):
+        """Handle Isaac Sim localization updates"""
+        # Publish to Nav2 for accurate positioning
+        self.publish_to_nav2_localization(msg)
+
+    def perception_callback(self, msg):
+        """Handle Isaac Sim perception updates"""
+        # Update Nav2 costmaps with Isaac Sim perception
+        self.update_nav2_costmaps(msg)
+```
+
+## Configuration and Parameters
+
+### Nav2 Configuration for Humanoid Robots
+```yaml
+# Nav2 configuration for humanoid robots
+bt_navigator:
+  ros__parameters:
+    global_frame: map
+    robot_base_frame: base_link
+    odom_topic: /odom
+    bt_loop_duration: 10
+    default_server_timeout: 20
+    enable_groot_monitoring: true
+    groot_zmq_publisher_port: 1666
+    groot_zmq_server_port: 1667
+    default_nav_to_pose_bt_xml: /opt/ros/humble/share/nav2_bt_navigator/behavior_trees/navigate_w_replanning_and_recovery.xml
+    plugin_lib_names:
+      - nav2_compute_path_to_pose_action_bt_node
+      - nav2_compute_path_through_poses_action_bt_node
+      - nav2_smooth_path_action_bt_node
+      - nav2_follow_path_action_bt_node
+      - nav2_spin_action_bt_node
+      - nav2_wait_action_bt_node
+      - nav2_assisted_teleop_action_bt_node
+      - nav2_back_up_action_bt_node
+      - nav2_drive_on_heading_bt_node
+      - nav2_clear_costmap_service_bt_node
+      - nav2_is_stuck_condition_bt_node
+      - nav2_goal_reached_condition_bt_node
+      - nav2_goal_updated_condition_bt_node
+      - nav2_initial_pose_received_condition_bt_node
+      - nav2_reinitialize_global_localization_service_bt_node
+      - nav2_rate_controller_bt_node
+      - nav2_distance_controller_bt_node
+      - nav2_speed_controller_bt_node
+      - nav2_truncate_path_action_bt_node
+      - nav2_truncate_path_local_action_bt_node
+      - nav2_goal_updater_node_bt_node
+      - nav2_recovery_node_bt_node
+      - nav2_pipeline_sequence_bt_node
+      - nav2_round_robin_node_bt_node
+      - nav2_transform_available_condition_bt_node
+      - nav2_time_expired_condition_bt_node
+      - nav2_path_expiring_timer_condition
+      - nav2_distance_traveled_condition_bt_node
+      - nav2_single_trigger_bt_node
+      - nav2_is_battery_low_condition_bt_node
+      - nav2_navigate_through_poses_action_bt_node
+      - nav2_navigate_to_pose_action_bt_node
+      - nav2_remove_passed_goals_action_bt_node
+      - nav2_planner_selector_bt_node
+      - nav2_controller_selector_bt_node
+      - nav2_goal_checker_selector_bt_node
+      - nav2_controller_cancel_bt_node
+      - nav2_path_longer_on_approach_bt_node
+      - nav2_wait_cancel_bt_node
+      - nav2_spin_cancel_bt_node
+      - nav2_back_up_cancel_bt_node
+      - nav2_assisted_teleop_cancel_bt_node
+      - nav2_drive_on_heading_cancel_bt_node
+      - nav2_is_controller_active_condition_bt_node
+      - nav2_is_planner_active_condition_bt_node
+      - nav2_is_goal_reached_condition_bt_node
+      - nav2_is_path_valid_condition_bt_node
+      - nav2_are_error_recovery_statistics_updated_condition_bt_node
+      - nav2_would_a_controller_recovery_help_condition_bt_node
+      - nav2_would_a_planner_recovery_help_condition_bt_node
+      - nav2_initial_heading_forwarded_condition_bt_node
+      - nav2_humanoid_balance_recovery_bt_node  # Humanoid-specific recovery
+      - nav2_humanoid_gait_aware_planner_bt_node  # Humanoid-specific planner
+
+controller_server:
+  ros__parameters:
+    controller_frequency: 20.0
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.001
+    min_theta_velocity_threshold: 0.001
+    progress_checker_plugin: "progress_checker"
+    goal_checker_plugin: "goal_checker"
+    controller_plugins: ["FollowPath"]
+
+    # Humanoid-specific controller
+    FollowPath:
+      plugin: "nav2_mppi::SimpleProgressChecker"
+      required_movement_radius: 0.5
+      movement_time_allowance: 10.0
+
+    # Balance-aware controller plugin
+    HumanoidBalanceController:
+      plugin: "module3_isaac_integration::BalanceAwareController"
+      linear_vel_max: 0.3  # Slower for stability
+      angular_vel_max: 0.5
+      balance_threshold: 0.7
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      update_frequency: 5.0
+      publish_frequency: 2.0
+      global_frame: odom
+      robot_base_frame: base_link
+      use_rollout_costs: true
+      rolling_window: true
+      width: 6
+      height: 6
+      resolution: 0.05
+      robot_radius: 0.3  # Humanoid-specific radius
+      plugins: ["voxel_layer", "inflation_layer", "balance_constraint_layer"]
+
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 3.0
+        inflation_radius: 0.55
+
+      voxel_layer:
+        plugin: "nav2_costmap_2d::VoxelLayer"
+        enabled: True
+        publish_voxel_map: False
+        origin_z: 0.0
+        z_resolution: 0.2
+        z_voxels: 10
+        max_obstacle_height: 2.0
+        mark_threshold: 0
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          clearing: True
+          marking: True
+          data_type: "LaserScan"
+          raytrace_max_range: 3.0
+          raytrace_min_range: 0.0
+          obstacle_max_range: 2.5
+          obstacle_min_range: 0.0
+
+      balance_constraint_layer:
+        plugin: "module3_isaac_integration::BalanceConstraintLayer"
+        enabled: true
+        weight: 2.0
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      update_frequency: 1.0
+      publish_frequency: 0.5
+      global_frame: map
+      robot_base_frame: base_link
+      robot_radius: 0.3
+      resolution: 0.05
+      track_unknown_space: true
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer", "gait_constraint_layer"]
+
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: true
+
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: True
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          clearing: True
+          marking: True
+          data_type: "LaserScan"
+          raytrace_max_range: 3.0
+          raytrace_min_range: 0.0
+          obstacle_max_range: 2.5
+          obstacle_min_range: 0.0
+
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 3.0
+        inflation_radius: 0.55
+
+      gait_constraint_layer:
+        plugin: "module3_isaac_integration::GaitConstraintLayer"
+        enabled: true
+        weight: 1.5
+
+planner_server:
+  ros__parameters:
+    expected_planner_frequency: 20.0
+    planner_plugins: ["GridBased"]
+    GridBased:
+      plugin: "nav2_navfn_planner/NavfnPlanner"
+      tolerance: 0.5
+      use_astar: false
+      allow_unknown: true
+      human_aware_planning: true  # Humanoid-specific option
+      gait_aware_planning: true   # Humanoid-specific option
+
+smoother_server:
+  ros__parameters:
+    smoother_plugins: ["simple_smoother"]
+    simple_smoother:
+      plugin: "nav2_smoother::SimpleSmoother"
+      tolerance: 1.0e-10
+      max_its: 1000
+      do_refinement: True
+
+behavior_server:
+  ros__parameters:
+    costmap_topic: local_costmap/costmap_raw
+    footprint_topic: local_costmap/published_footprint
+    cycle_frequency: 10.0
+    behavior_plugins: ["spin", "backup", "wait", "humanoid_balance_recovery"]
+    spin:
+      plugin: "nav2_behaviors/Spin"
+      spin_dist: 1.57
+      time_allowance: 10
+    backup:
+      plugin: "nav2_behaviors/BackUp"
+      backup_dist: 0.15
+      backup_speed: 0.025
+      time_allowance: 10
+    wait:
+      plugin: "nav2_behaviors/Wait"
+      wait_duration: 1.0
+    humanoid_balance_recovery:
+      plugin: "module3_isaac_integration::BalanceRecovery"
+      recovery_time: 5.0
+      stability_threshold: 0.8
+```
+
+## Summary
+
+The Nav2 architecture for humanoid robots requires specific adaptations to handle the unique challenges of bipedal locomotion. Key modifications include balance-aware controllers, gait-adapted planners, and humanoid-specific costmap layers. The architecture maintains compatibility with the standard Nav2 system while incorporating the physical and dynamic constraints inherent to humanoid robots. Proper integration with Isaac ROS provides additional GPU acceleration for real-time navigation performance.

@@ -1,0 +1,282 @@
+---
+title: "Domain Randomization"
+description: "Techniques for reducing sim-to-real gap through environmental and visual variation"
+sidebar_position: 4
+---
+
+# Domain Randomization
+
+## Introduction
+
+Domain randomization is a technique used to train machine learning models in simulation with randomized environmental conditions, textures, lighting, and other visual properties. This approach helps reduce the sim-to-real gap by forcing models to learn features that are invariant to these variations, making them more robust when deployed in the real world.
+
+## Understanding the Sim-to-Real Gap
+
+### The Challenge
+- Real-world environments are highly variable
+- Simulated environments are often too consistent
+- Models overfit to specific simulation conditions
+- Performance degrades when deployed to real robots
+
+### Domain Randomization Solution
+- Introduce controlled randomness in simulation
+- Train models to be invariant to visual variations
+- Improve generalization to unseen real-world conditions
+- Reduce need for extensive real-world training
+
+## Types of Domain Randomization
+
+### Visual Randomization
+- **Lighting**: Position, intensity, color, shadows
+- **Materials**: Textures, colors, reflectance properties
+- **Camera**: Intrinsics, noise, distortion
+- **Weather**: Fog, rain, snow, atmospheric effects
+
+### Physical Randomization
+- **Dynamics**: Mass, friction, restitution coefficients
+- **Geometry**: Object sizes, positions, orientations
+- **Actuator**: Noise, delays, response variations
+- **Sensors**: Noise models, bias, drift characteristics
+
+### Environmental Randomization
+- **Layout**: Room configurations, obstacle placement
+- **Objects**: Placement, appearance, physics properties
+- **Backgrounds**: Indoor/outdoor variations
+- **Context**: Seasonal, temporal, cultural variations
+
+## Implementation in Isaac Sim
+
+### Using Replicator Framework
+```python
+# Example: Domain randomization with Isaac Replicator
+import omni.replicator.core as rep
+
+with rep.new_layer():
+    # Randomize lighting conditions
+    lights = rep.create.light(
+        light_type="Dome",
+        rotation=rep.distribution.uniform((0, -180, 0), (0, 180, 0))
+    )
+
+    # Randomize material properties
+    def random_materials(prim):
+        with prim:
+            rep.randomizer.color_texture(
+                color_texture=rep.distribution.choice([
+                    "path/to/texture1.png",
+                    "path/to/texture2.png",
+                    "path/to/texture3.png"
+                ]),
+                color=rep.distribution.uniform((0.1, 0.1, 0.1), (1.0, 1.0, 1.0))
+            )
+        return prim
+
+    # Apply to humanoid robot
+    robot = rep.create.from_usd(usd_path="path/to/humanoid.usd")
+    rep.randomizer.material_api(random_materials, robot)
+
+    # Randomize object positions
+    objects = rep.create.cube(
+        position=rep.distribution.uniform((-2, 0, -2), (2, 2, 2)),
+        scale=rep.distribution.uniform((0.1, 0.1, 0.1), (0.5, 0.5, 0.5))
+    )
+```
+
+### Lighting Randomization
+```python
+# Example: Advanced lighting randomization
+def randomize_lighting():
+    # Create multiple light sources with random properties
+    dome_light = rep.create.light(
+        light_type="Dome",
+        intensity=rep.distribution.log_uniform(100, 10000),
+        color=rep.distribution.uniform((0.8, 0.8, 0.9), (1.0, 1.0, 1.0))
+    )
+
+    directional_light = rep.create.light(
+        light_type="Distant",
+        intensity=rep.distribution.uniform(500, 3000),
+        rotation=rep.distribution.uniform((-45, -180, -10), (45, 180, 10)),
+        color=rep.distribution.uniform((0.9, 0.9, 1.0), (1.0, 1.0, 1.0))
+    )
+
+    # Add random point lights
+    point_lights = rep.create.light(
+        light_type="Sphere",
+        position=rep.distribution.uniform((-3, 2, -3), (3, 5, 3)),
+        intensity=rep.distribution.uniform(100, 2000),
+        radius=rep.distribution.uniform(0.1, 0.5)
+    )
+
+    return dome_light, directional_light, point_lights
+```
+
+### Material Randomization
+```python
+# Example: Material property randomization
+def randomize_materials():
+    # Create material prim
+    material_prim = rep.create.material(
+        diffuse_texture=rep.distribution.choice([
+            "path/to/texture1.png",
+            "path/to/texture2.png",
+            "path/to/texture3.png"
+        ]),
+        roughness=rep.distribution.uniform(0.1, 0.9),
+        metallic=rep.distribution.uniform(0.0, 0.5),
+        specular=rep.distribution.uniform(0.1, 1.0),
+        emissive=rep.distribution.uniform((0.0, 0.0, 0.0), (0.1, 0.1, 0.1))
+    )
+
+    return material_prim
+```
+
+## Humanoid-Specific Domain Randomization
+
+### Locomotion Considerations
+- Randomize floor friction for different walking surfaces
+- Vary ground compliance for different terrain
+- Randomize obstacle heights and positions
+- Include dynamic obstacles for adaptive navigation
+
+### Perception Challenges
+- Randomize clothing and appearance for human detection
+- Vary lighting conditions for robust vision
+- Include occlusion scenarios for navigation
+- Randomize crowd density for social navigation
+
+### Balance and Control
+- Randomize robot dynamics (mass, inertia)
+- Add sensor noise for realistic perception
+- Include actuator delays and limitations
+- Randomize contact surfaces for balance training
+
+## Physics Randomization
+
+### Dynamics Randomization
+```python
+# Example: Physics property randomization for humanoid robots
+def randomize_physics_properties():
+    # Randomize mass properties
+    mass = rep.distribution.log_uniform(0.8, 1.2)  # 80% to 120% of nominal
+
+    # Randomize friction coefficients
+    static_friction = rep.distribution.uniform(0.4, 0.8)
+    dynamic_friction = rep.distribution.uniform(0.3, 0.7)
+
+    # Randomize restitution (bounciness)
+    restitution = rep.distribution.uniform(0.0, 0.2)
+
+    return {
+        "mass": mass,
+        "static_friction": static_friction,
+        "dynamic_friction": dynamic_friction,
+        "restitution": restitution
+    }
+```
+
+### Contact Randomization
+- Randomize contact stiffness and damping
+- Vary ground compliance for different surfaces
+- Include sensor noise in contact detection
+- Randomize contact patch properties
+
+## Advanced Techniques
+
+### Curriculum Learning
+- Start with limited randomization
+- Gradually increase variation complexity
+- Monitor performance during training
+- Adjust randomization based on learning progress
+
+### Adaptive Randomization
+- Monitor domain gap during training
+- Adjust randomization based on performance
+- Focus on challenging scenarios
+- Balance between diversity and difficulty
+
+### Inverse Domain Randomization
+- Learn domain-specific features in simulation
+- Adapt to specific real-world conditions
+- Use domain randomization to identify key features
+- Optimize for specific deployment environments
+
+## Validation and Evaluation
+
+### Performance Metrics
+- **Sim-to-real transfer rate**: Percentage of successful transfers
+- **Generalization**: Performance on unseen real-world data
+- **Robustness**: Performance under varying conditions
+- **Sample efficiency**: Training samples required for convergence
+
+### Validation Strategies
+- Hold out specific domains during training
+- Test on real-world data when available
+- Use intermediate validation environments
+- Monitor for over-randomization effects
+
+## Best Practices
+
+### Randomization Range Selection
+- Start with realistic ranges based on real-world data
+- Gradually expand ranges if needed
+- Avoid extreme values that don't occur in reality
+- Validate ranges with domain experts
+
+### Computational Considerations
+- Balance randomization complexity with training speed
+- Use efficient sampling strategies
+- Consider GPU memory limitations
+- Optimize rendering pipeline for randomization
+
+### Monitoring and Debugging
+- Track randomization statistics during training
+- Visualize randomization effects
+- Monitor for unrealistic combinations
+- Implement logging for reproducibility
+
+## Common Pitfalls
+
+### Over-Randomization
+- Randomization ranges too wide
+- Unrealistic combinations of parameters
+- Performance degradation due to excessive variation
+- Training instability
+
+### Under-Randomization
+- Not covering real-world variation
+- Poor sim-to-real transfer
+- Overfitting to specific conditions
+- Limited generalization
+
+## Integration with Training Pipelines
+
+### Data Generation Pipeline
+```python
+# Example: Integration with training pipeline
+def generate_training_data(num_samples=10000):
+    """Generate domain-randomized training data"""
+    for i in range(num_samples):
+        # Apply domain randomization
+        apply_domain_randomization()
+
+        # Run simulation and collect data
+        observations = run_simulation_episode()
+
+        # Save data with randomization parameters
+        save_training_data(observations, get_randomization_params())
+
+        # Log progress
+        if i % 1000 == 0:
+            print(f"Generated {i}/{num_samples} samples")
+```
+
+### Model Training Integration
+- Integrate with popular ML frameworks (PyTorch, TensorFlow)
+- Support for distributed training
+- Real-time data augmentation
+- Curriculum learning schedules
+
+## Summary
+
+Domain randomization is a powerful technique for reducing the sim-to-real gap in humanoid robotics. By systematically varying environmental, visual, and physical properties during training, models can learn to be robust to real-world variations. Proper implementation requires careful consideration of randomization ranges, computational efficiency, and validation strategies. When applied correctly, domain randomization can significantly improve the performance of AI systems deployed on real humanoid robots.

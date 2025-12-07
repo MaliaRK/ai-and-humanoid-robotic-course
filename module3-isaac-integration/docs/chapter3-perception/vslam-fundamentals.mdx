@@ -1,0 +1,327 @@
+---
+title: "Visual SLAM Fundamentals"
+description: "Core concepts and algorithms for Visual Simultaneous Localization and Mapping"
+sidebar_position: 2
+---
+
+# Visual SLAM Fundamentals
+
+## Introduction
+
+Visual Simultaneous Localization and Mapping (VSLAM) is a critical capability for humanoid robots, enabling them to understand their position in an unknown environment while building a map of that environment. VSLAM uses visual information from cameras to perform both localization and mapping simultaneously, providing the spatial awareness necessary for autonomous navigation and interaction.
+
+## Core Concepts
+
+### Localization vs. Mapping
+- **Localization**: Determining the robot's position and orientation in a known map
+- **Mapping**: Building a representation of the environment from sensor data
+- **SLAM**: Solving both problems simultaneously when neither is known
+
+### Visual SLAM Pipeline
+```
+Image Input → Feature Detection → Feature Matching → Pose Estimation → Map Building → Loop Closure
+```
+
+### Key Challenges
+- **Data Association**: Determining which features correspond to each other across frames
+- **Scale Ambiguity**: Monocular SLAM cannot determine absolute scale without additional information
+- **Drift**: Accumulation of small errors over time leading to map distortion
+- **Computational Complexity**: Real-time processing requirements
+
+## VSLAM Approaches
+
+### Filtering-Based Methods
+- **Extended Kalman Filter (EKF)**: Linearized state estimation
+- **Unscented Kalman Filter (UKF)**: Better handling of non-linearities
+- **Particle Filters**: Multiple hypothesis tracking for robustness
+
+### Keyframe-Based Methods
+- **Local Optimization**: Optimize recent keyframes only
+- **Global Optimization**: Optimize entire trajectory and map
+- **Loop Closure**: Detect and correct for revisited locations
+
+### Direct Methods
+- **Dense Reconstruction**: Use all pixels rather than sparse features
+- **Semi-Dense Methods**: Use pixels with high gradient information
+- **Photometric Error**: Minimize image reprojection error directly
+
+## Feature Detection and Matching
+
+### Feature Types
+- **Corners**: Harris corners, FAST corners, Shi-Tomasi corners
+- **Blobs**: SIFT, SURF, MSER features
+- **Edges**: Canny edges, gradient-based features
+- **Descriptors**: SIFT, ORB, BRIEF, FREAK descriptors
+
+### GPU-Accelerated Feature Detection
+```python
+# Example: GPU-accelerated feature detection
+import numpy as np
+import cv2
+from numba import cuda
+import math
+
+@cuda.jit
+def fast_corner_kernel(image, corners, threshold):
+    """GPU kernel for FAST corner detection"""
+    x, y = cuda.grid(2)
+    height, width = image.shape
+
+    if x < 3 or x >= width - 3 or y < 3 or y >= height - 3:
+        return
+
+    # FAST corner detection algorithm
+    center = image[y, x]
+
+    # Check if enough consecutive pixels are above/below threshold
+    count = 0
+    for i in range(16):  # 16 points around the circle
+        angle = 2 * math.pi * i / 16
+        dx = int(3 * math.cos(angle))
+        dy = int(3 * math.sin(angle))
+
+        if 0 <= x + dx < width and 0 <= y + dy < height:
+            pixel_val = image[y + dy, x + dx]
+            if abs(pixel_val - center) > threshold:
+                count += 1
+                if count >= 9:  # FAST-9
+                    corners[y, x] = 1
+                    break
+
+def detect_features_gpu(image, threshold=20):
+    """Detect features using GPU acceleration"""
+    # Transfer image to GPU
+    d_image = cuda.to_device(image.astype(np.uint8))
+    d_corners = cuda.to_device(np.zeros_like(image, dtype=np.uint8))
+
+    # Configure kernel launch parameters
+    threads_per_block = (16, 16)
+    blocks_per_grid_x = math.ceil(image.shape[1] / threads_per_block[0])
+    blocks_per_grid_y = math.ceil(image.shape[0] / threads_per_block[1])
+    blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y)
+
+    # Launch kernel
+    fast_corner_kernel[blocks_per_grid, threads_per_block](
+        d_image, d_corners, threshold
+    )
+
+    # Copy results back to CPU
+    corners = d_corners.copy_to_host()
+    return corners
+```
+
+## Pose Estimation
+
+### Essential Matrix
+- Relates corresponding points between two views
+- Encodes relative rotation and translation (up to scale)
+- Computed using 8-point or 5-point algorithms
+
+### Pose Optimization
+- **Bundle Adjustment**: Optimize camera poses and 3D points simultaneously
+- **Local Bundle Adjustment**: Optimize recent poses for efficiency
+- **Global Bundle Adjustment**: Optimize entire trajectory periodically
+
+### GPU-Accelerated Pose Estimation
+```python
+# Example: GPU-accelerated pose estimation
+import numpy as np
+from scipy.optimize import minimize
+import cupy as cp
+
+class GPUPoseEstimator:
+    def __init__(self):
+        self.gpu_available = cp.cuda.is_available()
+
+    def estimate_pose_gpu(self, points1, points2):
+        """Estimate pose between two sets of points using GPU"""
+        if self.gpu_available:
+            # Transfer data to GPU
+            gpu_points1 = cp.asarray(points1)
+            gpu_points2 = cp.asarray(points2)
+
+            # Compute essential matrix using GPU
+            E = self.compute_essential_matrix_gpu(gpu_points1, gpu_points2)
+
+            # Decompose essential matrix
+            R, t = self.decompose_essential_matrix_gpu(E)
+
+            # Transfer results back to CPU
+            return cp.asnumpy(R), cp.asnumpy(t)
+        else:
+            # Fallback to CPU implementation
+            return self.estimate_pose_cpu(points1, points2)
+
+    def compute_essential_matrix_gpu(self, points1, points2):
+        """Compute essential matrix using GPU"""
+        # Use 8-point algorithm on GPU
+        A = self.build_constraint_matrix_gpu(points1, points2)
+
+        # SVD decomposition on GPU
+        U, S, Vt = cp.linalg.svd(A)
+
+        # Extract essential matrix
+        E = Vt[-1].reshape(3, 3)
+
+        # Enforce essential matrix constraints
+        U, S, Vt = cp.linalg.svd(E)
+        S = cp.array([1.0, 1.0, 0.0])
+        E = U @ cp.diag(S) @ Vt
+
+        return E
+```
+
+## Map Representation
+
+### Sparse Map
+- **3D Points**: Triangulated feature points
+- **Descriptors**: Feature descriptors for re-identification
+- **Covisibility Graph**: Connectivity between keyframes
+- **Spanning Tree**: Minimum spanning tree for efficient optimization
+
+### Dense Map
+- **Volumetric Representation**: Occupancy grids, TSDF
+- **Surface Representation**: Meshes, point clouds
+- **Semantic Information**: Object labels, scene understanding
+
+## Tracking and Mapping Loop
+
+### Tracking Thread
+```python
+# Example: VSLAM tracking thread
+class VSLAMTracker:
+    def __init__(self, camera_params):
+        self.camera_params = camera_params
+        self.current_pose = np.eye(4)
+        self.keyframes = []
+        self.map_points = []
+
+    def track_frame(self, image):
+        """Track current frame against map"""
+        # Extract features from current image
+        current_features = self.extract_features(image)
+
+        # Match features with map points
+        matches = self.match_features_with_map(current_features)
+
+        # Estimate camera pose using PnP
+        if len(matches) >= 10:  # Minimum required matches
+            R, t = self.estimate_pose_pnp(matches)
+            self.current_pose = self.compose_transformation(R, t)
+
+            # Update tracking status
+            self.tracking_status = "tracked"
+        else:
+            # Try to recover using previous frame
+            self.tracking_status = "lost"
+
+        return self.current_pose
+```
+
+### Mapping Thread
+```python
+# Example: VSLAM mapping thread
+class VSLAMMapper:
+    def __init__(self):
+        self.keyframe_queue = []
+        self.global_ba_queue = []
+
+    def process_keyframe(self, keyframe):
+        """Process a new keyframe for mapping"""
+        # Triangulate new map points
+        new_points = self.triangulate_points(keyframe)
+
+        # Optimize local map around keyframe
+        self.optimize_local_map(keyframe)
+
+        # Check for loop closure
+        loop_candidates = self.find_loop_candidates(keyframe)
+        if loop_candidates:
+            self.perform_loop_closure(keyframe, loop_candidates)
+
+        return new_points
+```
+
+## Humanoid-Specific Considerations
+
+### Motion Models
+- **Bipedal Motion**: Account for walking patterns and gait
+- **Head Motion**: Compensate for head nodding/swaying
+- **Balance Constraints**: Maintain balance during SLAM operations
+- **Dynamic Motion**: Handle non-static camera motion
+
+### Multi-Sensor Fusion
+- **IMU Integration**: Use IMU for motion prediction
+- **Leg Odometry**: Integrate with leg kinematics
+- **Force/Torque**: Use contact information for motion constraints
+- **Multiple Cameras**: Fuse data from multiple viewpoints
+
+### Real-Time Requirements
+- **High Frame Rate**: Maintain 30+ FPS for stability
+- **Low Latency**: Minimize processing delay for reactivity
+- **Consistent Timing**: Predictable processing time
+- **Resource Management**: Efficient GPU utilization
+
+## Performance Metrics
+
+### Accuracy Metrics
+- **Absolute Trajectory Error (ATE)**: Difference between estimated and ground truth trajectory
+- **Relative Pose Error (RPE)**: Error in relative poses between frames
+- **Map Accuracy**: Precision of reconstructed 3D structure
+
+### Efficiency Metrics
+- **Processing Time**: Time per frame for tracking and mapping
+- **Memory Usage**: GPU and CPU memory consumption
+- **Power Consumption**: Energy efficiency for mobile robots
+
+## Isaac ROS VSLAM Integration
+
+### Isaac ROS Visual SLAM Node
+- **Feature Detection**: GPU-accelerated feature extraction
+- **Stereo Processing**: Real-time stereo matching
+- **Pose Estimation**: GPU-accelerated pose computation
+- **Map Building**: Efficient map representation
+
+### Configuration Options
+```yaml
+# Isaac ROS Visual SLAM configuration for humanoid robots
+isaac_ros_visual_slam:
+  ros__parameters:
+    # Feature detection
+    max_features: 2000
+    min_feature_distance: 15.0
+    feature_detector_type: "fast"
+
+    # Tracking
+    enable_rectified_edge: true
+    enable_debug_mode: false
+    publish_tf: true
+
+    # GPU settings
+    gpu_device_id: 0
+    enable_gpu_acceleration: true
+
+    # Humanoid-specific
+    enable_imu_fusion: true
+    imu_topic: "/imu/data"
+    base_frame: "base_link"
+    camera_frame: "camera_link"
+```
+
+## Troubleshooting Common Issues
+
+### Tracking Failure
+- **Insufficient Features**: Move to texture-rich environment
+- **Fast Motion**: Slow down robot movement
+- **Motion Blur**: Improve lighting conditions
+- **Featureless Environment**: Use direct methods or additional sensors
+
+### Drift and Accuracy
+- **Scale Drift**: Use stereo or IMU fusion
+- **Loop Closure**: Ensure loop closure is enabled
+- **Optimization**: Increase optimization frequency
+- **Calibration**: Verify camera calibration
+
+## Summary
+
+Visual SLAM is fundamental to humanoid robot autonomy, providing the spatial awareness necessary for navigation and interaction. The combination of feature detection, pose estimation, and map building enables robots to operate in unknown environments. GPU acceleration is essential for achieving real-time performance required by humanoid robots, and Isaac ROS provides optimized implementations for these computationally intensive algorithms.

@@ -1,0 +1,849 @@
+---
+title: 'ROS Data Streams for Sensors'
+description: 'Managing and processing sensor data streams in ROS for robotics applications'
+tags: ['ros', 'data-streams', 'sensors', 'topics', 'messages', 'robotics']
+sidebar_position: 5
+---
+
+# ROS Data Streams for Sensors
+
+ROS (Robot Operating System) provides a powerful framework for managing sensor data streams in robotics applications. This chapter covers the principles of ROS sensor data management, implementation techniques, and best practices for handling various sensor data types in ROS-based systems.
+
+## Understanding ROS Communication Model
+
+### Publisher-Subscriber Pattern
+
+ROS uses a publisher-subscriber communication model where:
+
+- **Publishers** send messages to named topics
+- **Subscribers** receive messages from named topics
+- **Topics** act as communication channels between nodes
+- **Nodes** are individual processes that communicate via topics
+
+### Service-Client Pattern
+
+For request-response communication:
+
+- **Services** provide synchronous communication
+- **Actions** provide asynchronous communication with feedback
+- **Parameters** store configuration values
+
+## Sensor Data Topics in ROS
+
+### Standard Sensor Topics
+
+Common sensor topic naming conventions:
+
+- **LiDAR**: `/scan`, `/laser_scan`
+- **Cameras**: `/camera/rgb/image_raw`, `/camera/depth/image_raw`
+- **IMU**: `/imu/data`, `/imu/data_raw`
+- **Odometry**: `/odom`, `/tf`, `/tf_static`
+- **Joint States**: `/joint_states`
+
+### Topic Namespaces
+
+Organizing sensor data with namespaces:
+
+```bash
+# Robot-specific topics
+/robot1/sensors/lidar/scan
+/robot1/sensors/imu/data
+/robot1/sensors/camera/rgb/image_raw
+
+# Multiple sensors of the same type
+/robot1/sensors/front_camera/rgb/image_raw
+/robot1/sensors/rear_camera/rgb/image_raw
+/robot1/sensors/left_camera/rgb/image_raw
+/robot1/sensors/right_camera/rgb/image_raw
+```
+
+## Standard Sensor Message Types
+
+### sensor_msgs Package
+
+The `sensor_msgs` package defines standard message types for sensors:
+
+#### LaserScan Message
+```python
+# LaserScan message structure
+header: Header
+angle_min: float32    # Start angle of the scan [rad]
+angle_max: float32    # End angle of the scan [rad]
+angle_increment: float32  # Angular distance between measurements [rad]
+time_increment: float32   # Time between measurements [seconds]
+scan_time: float32        # Time between scans [seconds]
+range_min: float32        # Minimum range value [m]
+range_max: float32        # Maximum range value [m]
+ranges: float32[]         # Range data [m]
+intensities: float32[]    # Optional intensity data
+```
+
+#### Image Message
+```python
+# Image message structure
+header: Header
+height: uint32      # Image height in pixels
+width: uint32       # Image width in pixels
+encoding: string    # Pixel encoding (e.g., "rgb8", "mono8", "bgr8")
+is_bigendian: uint8 # Endianness of the data (0 = little, 1 = big)
+step: uint32        # Full row length in bytes
+data: uint8[]       # Image data as bytes
+```
+
+#### Imu Message
+```python
+# Imu message structure
+header: Header
+orientation: geometry_msgs/Quaternion
+orientation_covariance: float64[9]
+angular_velocity: geometry_msgs/Vector3
+angular_velocity_covariance: float64[9]
+linear_acceleration: geometry_msgs/Vector3
+linear_acceleration_covariance: float64[9]
+```
+
+#### JointState Message
+```python
+# JointState message structure
+header: Header
+name: string[]      # Joint names
+position: float64[] # Joint positions [rad or m]
+velocity: float64[] # Joint velocities [rad/s or m/s]
+effort: float64[]   # Joint efforts [Nm or N]
+```
+
+## Creating Sensor Publishers
+
+### Python Publisher Example
+
+```python
+#!/usr/bin/env python3
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import LaserScan, Imu, Image
+from std_msgs.msg import Header
+from geometry_msgs.msg import Vector3, Quaternion
+import numpy as np
+import time
+
+class SensorPublisher(Node):
+    def __init__(self):
+        super().__init__('sensor_publisher')
+
+        # Create publishers for different sensor types
+        self.lidar_publisher = self.create_publisher(LaserScan, '/scan', 10)
+        self.imu_publisher = self.create_publisher(Imu, '/imu/data', 10)
+        self.image_publisher = self.create_publisher(Image, '/camera/image_raw', 10)
+
+        # Timer for publishing at specific rates
+        self.lidar_timer = self.create_timer(0.1, self.publish_lidar_data)  # 10 Hz
+        self.imu_timer = self.create_timer(0.01, self.publish_imu_data)     # 100 Hz
+        self.image_timer = self.create_timer(0.033, self.publish_image_data)  # 30 Hz
+
+        self.get_logger().info('Sensor Publisher Node Started')
+
+    def publish_lidar_data(self):
+        msg = LaserScan()
+        msg.header = Header()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = 'lidar_frame'
+
+        # Set laser scan parameters
+        msg.angle_min = -np.pi / 2  # -90 degrees
+        msg.angle_max = np.pi / 2   # 90 degrees
+        msg.angle_increment = np.pi / 180  # 1 degree
+        msg.time_increment = 0.0
+        msg.scan_time = 0.1
+        msg.range_min = 0.1
+        msg.range_max = 30.0
+
+        # Generate simulated range data
+        num_ranges = int((msg.angle_max - msg.angle_min) / msg.angle_increment) + 1
+        msg.ranges = [20.0] * num_ranges  # All ranges set to 20m (no obstacles)
+
+        self.lidar_publisher.publish(msg)
+
+    def publish_imu_data(self):
+        msg = Imu()
+        msg.header = Header()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = 'imu_frame'
+
+        # Set orientation (simplified - in real use, this would be computed)
+        msg.orientation = Quaternion(x=0.0, y=0.0, z=0.0, w=1.0)
+        msg.orientation_covariance = [-1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # No orientation data
+
+        # Set angular velocity
+        msg.angular_velocity = Vector3(x=0.0, y=0.0, z=0.0)
+        msg.angular_velocity_covariance = [0.01, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.01]
+
+        # Set linear acceleration
+        msg.linear_acceleration = Vector3(x=0.0, y=0.0, z=9.81)  # Gravity
+        msg.linear_acceleration_covariance = [0.01, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.01]
+
+        self.imu_publisher.publish(msg)
+
+    def publish_image_data(self):
+        msg = Image()
+        msg.header = Header()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = 'camera_frame'
+
+        # Set image parameters
+        msg.height = 480
+        msg.width = 640
+        msg.encoding = 'rgb8'
+        msg.is_bigendian = 0
+        msg.step = 640 * 3  # Width * 3 bytes per pixel (RGB)
+
+        # Create dummy image data (all pixels set to red)
+        msg.data = [255, 0, 0] * (msg.height * msg.width)  # Red image
+
+        self.image_publisher.publish(msg)
+
+def main(args=None):
+    rclpy.init(args=args)
+    sensor_publisher = SensorPublisher()
+    rclpy.spin(sensor_publisher)
+    sensor_publisher.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+### C++ Publisher Example
+
+```cpp
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
+#include <sensor_msgs/msg/imu.hpp>
+#include <sensor_msgs/msg/image.hpp>
+#include <geometry_msgs/msg/vector3.hpp>
+#include <geometry_msgs/msg/quaternion.hpp>
+
+class SensorPublisher : public rclcpp::Node
+{
+public:
+    SensorPublisher() : Node("sensor_publisher")
+    {
+        // Create publishers
+        lidar_publisher_ = this->create_publisher<sensor_msgs::msg::LaserScan>("/scan", 10);
+        imu_publisher_ = this->create_publisher<sensor_msgs::msg::Imu>("/imu/data", 10);
+        image_publisher_ = this->create_publisher<sensor_msgs::msg::Image>("/camera/image_raw", 10);
+
+        // Create timers
+        lidar_timer_ = this->create_wall_timer(
+            std::chrono::milliseconds(100),  // 10 Hz
+            std::bind(&SensorPublisher::publish_lidar_data, this)
+        );
+
+        imu_timer_ = this->create_wall_timer(
+            std::chrono::milliseconds(10),   // 100 Hz
+            std::bind(&SensorPublisher::publish_imu_data, this)
+        );
+
+        image_timer_ = this->create_wall_timer(
+            std::chrono::milliseconds(33),   // ~30 Hz
+            std::bind(&SensorPublisher::publish_image_data, this)
+        );
+
+        RCLCPP_INFO(this->get_logger(), "Sensor Publisher Node Started");
+    }
+
+private:
+    void publish_lidar_data()
+    {
+        auto msg = sensor_msgs::msg::LaserScan();
+        msg.header.stamp = this->now();
+        msg.header.frame_id = "lidar_frame";
+
+        // Set laser scan parameters
+        msg.angle_min = -M_PI / 2;  // -90 degrees
+        msg.angle_max = M_PI / 2;   // 90 degrees
+        msg.angle_increment = M_PI / 180;  // 1 degree
+        msg.time_increment = 0.0;
+        msg.scan_time = 0.1;
+        msg.range_min = 0.1;
+        msg.range_max = 30.0;
+
+        // Generate simulated range data
+        int num_ranges = static_cast<int>((msg.angle_max - msg.angle_min) / msg.angle_increment) + 1;
+        msg.ranges.resize(num_ranges, 20.0);  // All ranges set to 20m
+
+        lidar_publisher_->publish(msg);
+    }
+
+    void publish_imu_data()
+    {
+        auto msg = sensor_msgs::msg::Imu();
+        msg.header.stamp = this->now();
+        msg.header.frame_id = "imu_frame";
+
+        // Set orientation
+        msg.orientation.x = 0.0;
+        msg.orientation.y = 0.0;
+        msg.orientation.z = 0.0;
+        msg.orientation.w = 1.0;
+
+        // Initialize covariance arrays
+        for (int i = 0; i < 9; ++i) {
+            msg.orientation_covariance[i] = -1.0;  // No orientation data
+        }
+
+        // Set angular velocity
+        msg.angular_velocity.x = 0.0;
+        msg.angular_velocity.y = 0.0;
+        msg.angular_velocity.z = 0.0;
+
+        for (int i = 0; i < 9; ++i) {
+            msg.angular_velocity_covariance[i] = (i % 4 == 0) ? 0.01 : 0.0;
+        }
+
+        // Set linear acceleration
+        msg.linear_acceleration.x = 0.0;
+        msg.linear_acceleration.y = 0.0;
+        msg.linear_acceleration.z = 9.81;  // Gravity
+
+        for (int i = 0; i < 9; ++i) {
+            msg.linear_acceleration_covariance[i] = (i % 4 == 0) ? 0.01 : 0.0;
+        }
+
+        imu_publisher_->publish(msg);
+    }
+
+    void publish_image_data()
+    {
+        auto msg = sensor_msgs::msg::Image();
+        msg.header.stamp = this->now();
+        msg.header.frame_id = "camera_frame";
+
+        // Set image parameters
+        msg.height = 480;
+        msg.width = 640;
+        msg.encoding = "rgb8";
+        msg.is_bigendian = false;
+        msg.step = 640 * 3;  // Width * 3 bytes per pixel (RGB)
+
+        // Create dummy image data (all pixels set to red)
+        msg.data.resize(msg.height * msg.width * 3);
+        for (size_t i = 0; i < msg.data.size(); i += 3) {
+            msg.data[i] = 255;     // R
+            msg.data[i + 1] = 0;   // G
+            msg.data[i + 2] = 0;   // B
+        }
+
+        image_publisher_->publish(msg);
+    }
+
+    rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr lidar_publisher_;
+    rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_publisher_;
+    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr image_publisher_;
+
+    rclcpp::TimerBase::SharedPtr lidar_timer_;
+    rclcpp::TimerBase::SharedPtr imu_timer_;
+    rclcpp::TimerBase::SharedPtr image_timer_;
+};
+
+int main(int argc, char * argv[])
+{
+    rclcpp::init(argc, argv);
+    rclcpp::spin(std::make_shared<SensorPublisher>());
+    rclcpp::shutdown();
+    return 0;
+}
+```
+
+## Creating Sensor Subscribers
+
+### Python Subscriber Example
+
+```python
+#!/usr/bin/env python3
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import LaserScan, Imu, Image
+import numpy as np
+
+class SensorSubscriber(Node):
+    def __init__(self):
+        super().__init__('sensor_subscriber')
+
+        # Create subscribers for different sensor types
+        self.lidar_subscriber = self.create_subscription(
+            LaserScan, '/scan', self.lidar_callback, 10
+        )
+        self.imu_subscriber = self.create_subscription(
+            Imu, '/imu/data', self.imu_callback, 10
+        )
+        self.image_subscriber = self.create_subscription(
+            Image, '/camera/image_raw', self.image_callback, 10
+        )
+
+        self.get_logger().info('Sensor Subscriber Node Started')
+
+    def lidar_callback(self, msg):
+        # Process LiDAR data
+        self.get_logger().info(f'Received LiDAR scan with {len(msg.ranges)} points')
+
+        # Example: Find minimum range
+        if msg.ranges:
+            min_range = min([r for r in msg.ranges if r > msg.range_min and r < msg.range_max])
+            self.get_logger().info(f'Minimum range: {min_range:.2f}m')
+
+    def imu_callback(self, msg):
+        # Process IMU data
+        self.get_logger().info('Received IMU data')
+
+        # Example: Extract linear acceleration
+        acc = msg.linear_acceleration
+        self.get_logger().info(f'Linear acceleration: ({acc.x:.2f}, {acc.y:.2f}, {acc.z:.2f})')
+
+    def image_callback(self, msg):
+        # Process image data
+        self.get_logger().info(f'Received image: {msg.width}x{msg.height}, encoding: {msg.encoding}')
+
+        # Example: Calculate average intensity (simplified)
+        if msg.data:
+            avg_intensity = sum(msg.data) / len(msg.data)
+            self.get_logger().info(f'Average pixel intensity: {avg_intensity:.2f}')
+
+def main(args=None):
+    rclpy.init(args=args)
+    sensor_subscriber = SensorSubscriber()
+    rclpy.spin(sensor_subscriber)
+    sensor_subscriber.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+## Sensor Data Synchronization
+
+### Time Synchronization
+
+Synchronizing data from multiple sensors:
+
+```python
+#!/usr/bin/env python3
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import LaserScan, Imu, Image
+from message_filters import ApproximateTimeSynchronizer, Subscriber
+import message_filters
+
+class SynchronizedSensorSubscriber(Node):
+    def __init__(self):
+        super().__init__('synchronized_sensor_subscriber')
+
+        # Create subscribers
+        lidar_sub = Subscriber(self, LaserScan, '/scan')
+        imu_sub = Subscriber(self, Imu, '/imu/data')
+        image_sub = Subscriber(self, Image, '/camera/image_raw')
+
+        # Synchronize messages with a time tolerance of 0.1 seconds
+        ats = ApproximateTimeSynchronizer(
+            [lidar_sub, imu_sub, image_sub],
+            queue_size=10,
+            slop=0.1
+        )
+        ats.registerCallback(self.sync_callback)
+
+        self.get_logger().info('Synchronized Sensor Subscriber Node Started')
+
+    def sync_callback(self, lidar_msg, imu_msg, image_msg):
+        # Process synchronized sensor data
+        self.get_logger().info('Received synchronized sensor data')
+        self.get_logger().info(f'LiDAR: {len(lidar_msg.ranges)} points')
+        self.get_logger().info(f'IMU: acc=({imu_msg.linear_acceleration.x:.2f}, {imu_msg.linear_acceleration.y:.2f}, {imu_msg.linear_acceleration.z:.2f})')
+        self.get_logger().info(f'Image: {image_msg.width}x{image_msg.height}')
+
+def main(args=None):
+    rclpy.init(args=args)
+    sync_subscriber = SynchronizedSensorSubscriber()
+    rclpy.spin(sync_subscriber)
+    sync_subscriber.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+### TF Integration
+
+Integrating sensor data with transforms:
+
+```python
+#!/usr/bin/env python3
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import LaserScan
+import tf2_ros
+import tf2_geometry_msgs
+from geometry_msgs.msg import PointStamped
+
+class SensorTFProcessor(Node):
+    def __init__(self):
+        super().__init__('sensor_tf_processor')
+
+        # Create subscriber
+        self.scan_subscriber = self.create_subscription(
+            LaserScan, '/scan', self.scan_callback, 10
+        )
+
+        # Create TF buffer and listener
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
+
+        self.get_logger().info('Sensor TF Processor Node Started')
+
+    def scan_callback(self, msg):
+        try:
+            # Transform laser scan points to robot base frame
+            transform = self.tf_buffer.lookup_transform(
+                'base_link',  # Target frame
+                msg.header.frame_id,  # Source frame
+                msg.header.stamp,  # Time
+                timeout=rclpy.duration.Duration(seconds=1.0)
+            )
+
+            # Process transformed data
+            self.get_logger().info(f'Transformed scan data to base_link frame')
+
+        except tf2_ros.TransformException as ex:
+            self.get_logger().warn(f'Could not transform scan: {ex}')
+```
+
+## Sensor Data Processing Pipelines
+
+### Filtering and Preprocessing
+
+```python
+#!/usr/bin/env python3
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import LaserScan
+from std_msgs.msg import Float32MultiArray
+import numpy as np
+from scipy import ndimage
+
+class SensorDataProcessor(Node):
+    def __init__(self):
+        super().__init__('sensor_data_processor')
+
+        # Create subscriber and publisher
+        self.scan_subscriber = self.create_subscription(
+            LaserScan, '/scan', self.scan_callback, 10
+        )
+        self.processed_publisher = self.create_publisher(
+            Float32MultiArray, '/processed_scan', 10
+        )
+
+        self.get_logger().info('Sensor Data Processor Node Started')
+
+    def scan_callback(self, msg):
+        # Convert ranges to numpy array for processing
+        ranges = np.array(msg.ranges)
+
+        # Filter out invalid ranges (inf, nan, etc.)
+        valid_ranges = ranges[(ranges > msg.range_min) & (ranges < msg.range_max)]
+
+        # Apply median filter to reduce noise
+        if len(valid_ranges) > 3:
+            filtered_ranges = ndimage.median_filter(valid_ranges, size=3)
+        else:
+            filtered_ranges = valid_ranges
+
+        # Detect obstacles
+        obstacle_threshold = 1.0  # 1 meter
+        obstacles = filtered_ranges[filtered_ranges < obstacle_threshold]
+
+        # Publish processed data
+        processed_msg = Float32MultiArray()
+        processed_msg.data = obstacles.tolist()
+        self.processed_publisher.publish(processed_msg)
+
+        self.get_logger().info(f'Found {len(obstacles)} obstacles')
+
+def main(args=None):
+    rclpy.init(args=args)
+    processor = SensorDataProcessor()
+    rclpy.spin(processor)
+    processor.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+## Performance Considerations
+
+### Bandwidth Management
+
+Managing sensor data bandwidth:
+
+```python
+#!/usr/bin/env python3
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import Image
+from sensor_msgs.msg import CompressedImage
+import cv2
+import numpy as np
+
+class BandwidthOptimizedImageProcessor(Node):
+    def __init__(self):
+        super().__init__('bandwidth_optimized_image_processor')
+
+        # Subscribe to raw image
+        self.image_subscriber = self.create_subscription(
+            Image, '/camera/image_raw', self.image_callback, 10
+        )
+
+        # Publish compressed image
+        self.compressed_publisher = self.create_publisher(
+            CompressedImage, '/camera/image_compressed', 10
+        )
+
+        self.get_logger().info('Bandwidth Optimized Image Processor Started')
+
+    def image_callback(self, msg):
+        # Convert ROS image to OpenCV format
+        np_img = np.frombuffer(msg.data, dtype=np.uint8)
+        np_img = np_img.reshape((msg.height, msg.width, 3))
+
+        # Compress image
+        result, encoded_img = cv2.imencode('.jpg', np_img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+
+        if result:
+            # Create compressed image message
+            compressed_msg = CompressedImage()
+            compressed_msg.header = msg.header
+            compressed_msg.format = "jpeg"
+            compressed_msg.data = encoded_img.tobytes()
+
+            self.compressed_publisher.publish(compressed_msg)
+```
+
+### Quality of Service (QoS) Settings
+
+Configuring QoS for different sensor requirements:
+
+```python
+#!/usr/bin/env python3
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import Image, LaserScan
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+
+class QoSSensorPublisher(Node):
+    def __init__(self):
+        super().__init__('qos_sensor_publisher')
+
+        # High-reliability for critical data (e.g., LiDAR for navigation)
+        reliable_qos = QoSProfile(
+            depth=10,
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST
+        )
+
+        # Best-effort for high-bandwidth data (e.g., camera images)
+        best_effort_qos = QoSProfile(
+            depth=5,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST
+        )
+
+        # Create publishers with different QoS profiles
+        self.lidar_publisher = self.create_publisher(LaserScan, '/scan', reliable_qos)
+        self.image_publisher = self.create_publisher(Image, '/camera/image_raw', best_effort_qos)
+```
+
+## Sensor Calibration and Validation
+
+### Calibration Tools
+
+ROS provides various calibration tools:
+
+```bash
+# Camera calibration
+ros2 run camera_calibration cameracalibrator --size 8x6 --square 0.108 image:=/camera/image_raw camera:=/camera
+
+# IMU calibration
+ros2 run imu_calib calibrate_imu
+
+# LiDAR calibration
+ros2 run lidar_calib calibrate_lidar
+```
+
+### Validation Techniques
+
+Validating sensor data quality:
+
+```python
+#!/usr/bin/env python3
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import LaserScan
+import numpy as np
+
+class SensorValidator(Node):
+    def __init__(self):
+        super().__init__('sensor_validator')
+
+        self.scan_subscriber = self.create_subscription(
+            LaserScan, '/scan', self.scan_callback, 10
+        )
+
+        # Statistics tracking
+        self.scan_count = 0
+        self.range_statistics = {'min': [], 'max': [], 'mean': []}
+
+        self.get_logger().info('Sensor Validator Node Started')
+
+    def scan_callback(self, msg):
+        self.scan_count += 1
+
+        # Convert valid ranges to numpy array
+        valid_ranges = np.array([r for r in msg.ranges if msg.range_min < r < msg.range_max])
+
+        if len(valid_ranges) > 0:
+            # Update statistics
+            self.range_statistics['min'].append(np.min(valid_ranges))
+            self.range_statistics['max'].append(np.max(valid_ranges))
+            self.range_statistics['mean'].append(np.mean(valid_ranges))
+
+            # Check for anomalies
+            if np.std(valid_ranges) > 5.0:  # Arbitrary threshold
+                self.get_logger().warn('High variance in sensor readings detected')
+
+            # Log statistics periodically
+            if self.scan_count % 100 == 0:
+                self.get_logger().info(
+                    f'Sensor stats (last 100 scans): '
+                    f'min: {np.mean(self.range_statistics["min"][-100:]):.2f}, '
+                    f'max: {np.mean(self.range_statistics["max"][-100:]):.2f}, '
+                    f'mean: {np.mean(self.range_statistics["mean"][-100:]):.2f}'
+                )
+```
+
+## Troubleshooting Common Issues
+
+### Topic Connection Issues
+
+```bash
+# Check if topics are available
+ros2 topic list
+
+# Check topic types
+ros2 topic info /scan
+
+# Echo topic data
+ros2 topic echo /scan
+
+# Check for publishers/subscribers
+ros2 topic info /scan
+```
+
+### Message Type Mismatches
+
+```python
+# Check message type before processing
+def check_message_type(self, msg):
+    if not isinstance(msg, LaserScan):
+        self.get_logger().error(f'Expected LaserScan, got {type(msg)}')
+        return False
+    return True
+```
+
+### Timing Issues
+
+```python
+# Check message timestamps
+def validate_timestamp(self, msg):
+    current_time = self.get_clock().now()
+    msg_time = rclpy.time.Time.from_msg(msg.header.stamp)
+    time_diff = (current_time - msg_time).nanoseconds / 1e9  # seconds
+
+    if time_diff > 1.0:  # More than 1 second old
+        self.get_logger().warn(f'Message is {time_diff:.2f}s old')
+```
+
+## Best Practices
+
+### Naming Conventions
+
+Follow standard ROS naming conventions:
+
+- Use lowercase with underscores: `/camera/rgb/image_raw`
+- Use meaningful names: `/front_lidar/scan` vs `/scan`
+- Use consistent namespaces: `/robot1/sensors/...`
+
+### Message Validation
+
+Always validate incoming messages:
+
+```python
+def validate_laser_scan(self, msg):
+    if len(msg.ranges) == 0:
+        self.get_logger().warn('Empty laser scan received')
+        return False
+
+    if msg.angle_increment == 0:
+        self.get_logger().warn('Invalid angle increment in laser scan')
+        return False
+
+    return True
+```
+
+### Error Handling
+
+Implement robust error handling:
+
+```python
+def safe_publish(self, publisher, msg):
+    try:
+        publisher.publish(msg)
+    except Exception as e:
+        self.get_logger().error(f'Failed to publish message: {e}')
+```
+
+### Resource Management
+
+Manage resources efficiently:
+
+```python
+def cleanup(self):
+    # Clean up resources when node is destroyed
+    self.lidar_publisher.destroy()
+    self.imu_publisher.destroy()
+    self.image_publisher.destroy()
+    super().destroy_node()
+```
+
+## Advanced Topics
+
+### Multi-Robot Sensor Fusion
+
+Handling sensor data from multiple robots:
+
+```bash
+# Namespaced topics for multi-robot systems
+/robot1/sensors/lidar/scan
+/robot2/sensors/lidar/scan
+/fusion_node/combined_map
+```
+
+### Sensor Fusion Algorithms
+
+Integrating multiple sensor streams:
+
+- **Kalman Filters**: Optimal state estimation
+- **Particle Filters**: Non-linear state estimation
+- **Bayesian Networks**: Probabilistic reasoning
+- **Deep Learning**: End-to-end sensor processing
+
+## Next Steps
+
+In the following sections, we'll explore how to create sensor configuration files for Gazebo plugins and verify that sensor data streams match real-world characteristics.

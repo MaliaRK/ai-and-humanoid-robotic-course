@@ -1,0 +1,1111 @@
+---
+title: "Collision Avoidance and Safety Constraints"
+description: "Implementing collision avoidance and safety mechanisms for humanoid robot navigation"
+sidebar_position: 6
+---
+
+# Collision Avoidance and Safety Constraints
+
+## Introduction
+
+Collision avoidance and safety constraints are critical for humanoid robot navigation, especially in human-populated environments. Unlike wheeled robots, humanoid robots must navigate with additional safety considerations due to their human-like scale, potential for causing harm to humans, and the risk of falling and damaging themselves. This chapter covers the implementation of robust collision avoidance systems and safety constraints for humanoid robot navigation.
+
+## Humanoid-Specific Safety Considerations
+
+### Physical Safety Factors
+- **Human Proximity**: Humanoid robots operate at human eye level and must avoid collisions with humans
+- **Fall Risk**: Humanoid robots can fall, potentially causing damage to themselves and surroundings
+- **Manipulation Safety**: Arms and hands can cause harm if not properly constrained
+- **Dynamic Balance**: Loss of balance can lead to unsafe situations
+
+### Social Safety Factors
+- **Personal Space**: Respecting human personal space and comfort zones
+- **Social Navigation**: Following social norms for navigation in crowded areas
+- **Predictable Behavior**: Ensuring robot behavior is predictable to humans
+- **Emergency Protocols**: Safe stopping procedures when humans are at risk
+
+## Collision Detection Architecture
+
+### Multi-Layered Safety System
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Environment   │    │  Perception     │    │ Collision Avoid │
+│   Monitoring    │───▶│   Processing    │───▶│   System        │
+│                 │    │                 │    │                 │
+│ • Dynamic Objs  │    │ • 3D Mapping    │    │ • Local Planner │
+│ • Human Tracking│    │ • Object Detect │    │ • Safety Buffer │
+│ • Social Zones  │    │ • Depth Process │    │ • Emergency Stop│
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         ▼                       ▼                       ▼
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Risk Assess   │    │  Path Planning  │    │   Safe Motion   │
+│                 │    │                 │    │                 │
+│ • Threat Level  │    │ • Safe Path Gen │    │ • Velocity Limit│
+│ • Urgency Class │    │ • Costmap Update│    │ • Gait Control  │
+│ • Response Type │    │ • Constraint Add│    │ • Balance Maint │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+### Safety Zones Classification
+```python
+# Example: Safety zone classification for humanoid robots
+from enum import Enum
+from dataclasses import dataclass
+from typing import List, Tuple
+import numpy as np
+
+class SafetyZone(Enum):
+    """Classification of safety zones around humans and obstacles"""
+    DANGEROUS = 0      # Immediate collision risk (0.0-0.3m)
+    CAUTION = 1        # Potential risk (0.3-0.8m)
+    SOCIAL = 2         # Personal space (0.8-1.2m)
+    COMFORTABLE = 3    # Social interaction zone (1.2-3.6m)
+
+@dataclass
+class SafetyRegion:
+    """Represents a safety region around an object/human"""
+    center: Tuple[float, float, float]  # x, y, z coordinates
+    radius: float                       # radius of influence
+    zone_type: SafetyZone               # safety classification
+    priority: int                       # response priority (1=highest, 5=lowest)
+    moving: bool                        # whether object is moving
+
+class SafetyZoneClassifier:
+    """Classifies safety zones for collision avoidance"""
+
+    def __init__(self):
+        # Define zone boundaries (in meters)
+        self.zone_boundaries = {
+            SafetyZone.DANGEROUS: 0.3,
+            SafetyZone.CAUTION: 0.8,
+            SafetyZone.SOCIAL: 1.2,
+            SafetyZone.COMFORTABLE: 3.6
+        }
+
+        # Safety response priorities
+        self.response_priorities = {
+            SafetyZone.DANGEROUS: 1,   # Highest priority
+            SafetyZone.CAUTION: 2,
+            SafetyZone.SOCIAL: 3,
+            SafetyZone.COMFORTABLE: 5  # Lowest priority
+        }
+
+    def classify_region(self, distance: float, object_type: str = "unknown") -> SafetyRegion:
+        """Classify a region based on distance and object type"""
+        # Determine zone based on distance
+        zone_type = self.get_zone_type(distance)
+
+        # Adjust for object type
+        if object_type == "human":
+            # Humans get more conservative safety margins
+            if distance < self.zone_boundaries[SafetyZone.CAUTION]:
+                zone_type = SafetyZone.DANGEROUS
+            elif distance < self.zone_boundaries[SafetyZone.SOCIAL]:
+                zone_type = SafetyZone.CAUTION
+        elif object_type == "moving_object":
+            # Moving objects get higher priority
+            if zone_type == SafetyZone.COMFORTABLE:
+                zone_type = SafetyZone.SOCIAL
+
+        priority = self.response_priorities[zone_type]
+
+        return SafetyRegion(
+            center=(0, 0, 0),  # Placeholder
+            radius=distance,
+            zone_type=zone_type,
+            priority=priority,
+            moving=object_type == "moving_object"
+        )
+
+    def get_zone_type(self, distance: float) -> SafetyZone:
+        """Get safety zone type based on distance"""
+        if distance <= self.zone_boundaries[SafetyZone.DANGEROUS]:
+            return SafetyZone.DANGEROUS
+        elif distance <= self.zone_boundaries[SafetyZone.CAUTION]:
+            return SafetyZone.CAUTION
+        elif distance <= self.zone_boundaries[SafetyZone.SOCIAL]:
+            return SafetyZone.SOCIAL
+        else:
+            return SafetyZone.COMFORTABLE
+
+    def calculate_influence_cost(self, region: SafetyRegion) -> float:
+        """Calculate cost for costmap based on safety region"""
+        # Higher cost for higher priority (more dangerous) zones
+        distance_factor = max(0.0, 1.0 - region.radius / 3.0)  # Decreases with distance
+        priority_factor = 5.0 / region.priority  # Higher for higher priority
+
+        # Moving objects get higher cost
+        motion_factor = 1.5 if region.moving else 1.0
+
+        cost = min(254.0, distance_factor * priority_factor * motion_factor * 100.0)
+        return cost
+```
+
+## Collision Detection Algorithms
+
+### 3D Collision Detection
+```python
+# Example: 3D collision detection for humanoid robots
+import numpy as np
+from scipy.spatial.distance import cdist
+from geometry_msgs.msg import Point
+from sensor_msgs.msg import PointCloud2
+import sensor_msgs_py.point_cloud2 as pc2
+
+class ThreeDCollisionDetector:
+    """3D collision detection for humanoid robots"""
+
+    def __init__(self):
+        # Robot dimensions and safety margins
+        self.robot_height = 1.6  # meters (humanoid height)
+        self.robot_radius = 0.3  # meters (cylindrical approximation)
+        self.safety_margin = 0.2  # additional safety buffer
+
+        # Collision detection parameters
+        self.collision_threshold = 0.1  # meters
+        self.warning_threshold = 0.5   # meters
+
+    def detect_collisions_3d(self, pointcloud: PointCloud2, robot_pose) -> List[dict]:
+        """Detect potential collisions in 3D space"""
+        # Convert PointCloud2 to numpy array
+        points = self.pointcloud_to_numpy(pointcloud)
+
+        # Define robot bounding volume (cylinder)
+        robot_volume = self.define_robot_volume(robot_pose)
+
+        # Check for collisions
+        collisions = []
+        warnings = []
+
+        for point in points:
+            # Calculate distance to robot center (horizontal plane)
+            horizontal_dist = np.sqrt((point[0] - robot_pose.position.x)**2 +
+                                    (point[1] - robot_pose.position.y)**2)
+
+            # Check horizontal collision (considering robot radius and safety margin)
+            if horizontal_dist < (self.robot_radius + self.safety_margin):
+                # Check vertical collision (height-wise)
+                vertical_dist = abs(point[2] - robot_pose.position.z)
+
+                # Humanoid robots are tall, so check multiple height levels
+                if vertical_dist < self.robot_height:
+                    # Potential collision detected
+                    collision_info = {
+                        'point': point,
+                        'distance': np.sqrt(horizontal_dist**2 + vertical_dist**2),
+                        'collision_type': self.classify_collision_type(point, robot_pose),
+                        'severity': self.calculate_collision_severity(point, robot_pose),
+                        'recommended_action': self.determine_recommended_action(point, robot_pose)
+                    }
+
+                    if collision_info['distance'] < self.collision_threshold:
+                        collisions.append(collision_info)
+                    elif collision_info['distance'] < self.warning_threshold:
+                        warnings.append(collision_info)
+
+        return collisions, warnings
+
+    def define_robot_volume(self, robot_pose):
+        """Define 3D volume occupied by robot"""
+        # Approximate as cylinder with safety margin
+        center = np.array([robot_pose.position.x, robot_pose.position.y, robot_pose.position.z])
+        radius = self.robot_radius + self.safety_margin
+        height = self.robot_height
+
+        return {
+            'center': center,
+            'radius': radius,
+            'height': height
+        }
+
+    def classify_collision_type(self, point, robot_pose):
+        """Classify type of potential collision"""
+        # Calculate relative position
+        rel_x = point[0] - robot_pose.position.x
+        rel_y = point[1] - robot_pose.position.y
+        rel_z = point[2] - robot_pose.position.z
+
+        # Determine collision location on robot
+        if abs(rel_z) < 0.5:  # Lower body / legs
+            return "lower_body_collision"
+        elif 0.5 <= abs(rel_z) <= 1.2:  # Mid body / torso
+            return "torso_collision"
+        else:  # Head / upper body
+            return "upper_body_collision"
+
+    def calculate_collision_severity(self, point, robot_pose):
+        """Calculate severity of potential collision"""
+        # Distance-based severity (closer = more severe)
+        dist = np.sqrt(
+            (point[0] - robot_pose.position.x)**2 +
+            (point[1] - robot_pose.position.y)**2 +
+            (point[2] - robot_pose.position.z)**2
+        )
+
+        # Severity increases exponentially as distance decreases
+        severity = max(0.0, 1.0 - dist / self.warning_threshold)
+        return min(1.0, severity)  # Clamp to 0-1
+
+    def determine_recommended_action(self, point, robot_pose):
+        """Determine recommended action based on collision"""
+        severity = self.calculate_collision_severity(point, robot_pose)
+
+        if severity > 0.8:
+            return "immediate_stop"
+        elif severity > 0.5:
+            return "emergency_avoidance"
+        elif severity > 0.2:
+            return "cautious_navigation"
+        else:
+            return "normal_navigation"
+
+    def pointcloud_to_numpy(self, pointcloud_msg):
+        """Convert PointCloud2 message to numpy array"""
+        points_list = []
+        for point in pc2.read_points(pointcloud_msg, field_names=("x", "y", "z"), skip_nans=True):
+            points_list.append([point[0], point[1], point[2]])
+
+        return np.array(points_list)
+```
+
+## Human-Aware Collision Avoidance
+
+### Socially-Aware Navigation
+```python
+# Example: Socially-aware collision avoidance
+class SociallyAwareCollisionAvoidance:
+    """Collision avoidance considering social norms and human comfort"""
+
+    def __init__(self):
+        # Social navigation parameters
+        self.personal_space_radius = 0.8  # meters
+        self.social_zone_radius = 1.2    # meters
+        self.public_zone_radius = 3.6    # meters
+
+        # Human tracking
+        self.human_trackers = {}  # {track_id: tracker}
+        self.social_zones = []    # List of active social zones
+
+    def update_human_tracking(self, humans_detected):
+        """Update tracking of humans in environment"""
+        for human in humans_detected:
+            track_id = human.id
+
+            if track_id not in self.human_trackers:
+                # Initialize new tracker
+                self.human_trackers[track_id] = HumanTracker(human.position)
+
+            # Update existing tracker
+            self.human_trackers[track_id].update(human.position, human.velocity)
+
+        # Remove old trackers that haven't been seen
+        current_tracks = {h.id for h in humans_detected}
+        expired_tracks = set(self.human_trackers.keys()) - current_tracks
+
+        for track_id in expired_tracks:
+            del self.human_trackers[track_id]
+
+    def create_social_costmap_overlay(self):
+        """Create costmap overlay for social zones"""
+        # Create costmap based on human positions and social norms
+        social_costmap = np.zeros((100, 100))  # Example grid
+
+        for track_id, tracker in self.human_trackers.items():
+            human_pos = tracker.get_current_position()
+
+            # Add personal space cost (highest cost)
+            self.add_personal_space_cost(social_costmap, human_pos)
+
+            # Add social zone cost (medium cost)
+            self.add_social_zone_cost(social_costmap, human_pos)
+
+        return social_costmap
+
+    def add_personal_space_cost(self, costmap, human_pos):
+        """Add high cost for personal space violation"""
+        # Convert world coordinates to grid coordinates
+        grid_x, grid_y = self.world_to_grid(human_pos.x, human_pos.y)
+
+        # Create circular cost area around human
+        radius = int(self.personal_space_radius / self.costmap_resolution)
+
+        for dx in range(-radius, radius + 1):
+            for dy in range(-radius, radius + 1):
+                if dx*dx + dy*dy <= radius*radius:
+                    x_idx = grid_x + dx
+                    y_idx = grid_y + dy
+
+                    if 0 <= x_idx < costmap.shape[0] and 0 <= y_idx < costmap.shape[1]:
+                        # High cost for personal space
+                        costmap[x_idx, y_idx] = max(costmap[x_idx, y_idx], 200)
+
+    def add_social_zone_cost(self, costmap, human_pos):
+        """Add medium cost for social zone proximity"""
+        # Similar to personal space but with lower cost and larger radius
+        grid_x, grid_y = self.world_to_grid(human_pos.x, human_pos.y)
+        radius = int(self.social_zone_radius / self.costmap_resolution)
+
+        for dx in range(-radius, radius + 1):
+            for dy in range(-radius, radius + 1):
+                dist_sq = dx*dx + dy*dy
+                if dist_sq <= radius*radius:
+                    # Only apply cost outside personal space
+                    personal_radius_sq = int(self.personal_space_radius / self.costmap_resolution)**2
+                    if dist_sq > personal_radius_sq:
+                        x_idx = grid_x + dx
+                        y_idx = grid_y + dy
+
+                        if 0 <= x_idx < costmap.shape[0] and 0 <= y_idx < costmap.shape[1]:
+                            # Medium cost for social zone
+                            costmap[x_idx, y_idx] = max(costmap[x_idx, y_idx], 100)
+
+    def plan_socially_aware_path(self, start, goal, humans_nearby):
+        """Plan path considering social navigation norms"""
+        # Update human tracking
+        self.update_human_tracking(humans_nearby)
+
+        # Create social costmap overlay
+        social_costmap = self.create_social_costmap_overlay()
+
+        # Plan path using modified costmap
+        path = self.plan_path_with_costmap_overlay(start, goal, social_costmap)
+
+        # Post-process path for social navigation
+        socially_aware_path = self.adapt_path_for_social_navigation(path, humans_nearby)
+
+        return socially_aware_path
+
+    def adapt_path_for_social_navigation(self, path, humans):
+        """Adapt path to follow social navigation norms"""
+        adapted_path = []
+
+        for i, pose in enumerate(path):
+            if i == 0:
+                adapted_path.append(pose)
+                continue
+
+            prev_pose = adapted_path[-1]
+
+            # Check if path passes too close to humans
+            too_close_to_humans = False
+            for human in humans:
+                dist = self.calculate_distance_2d(pose.position, human.position)
+                if dist < self.social_zone_radius:
+                    too_close_to_humans = True
+                    break
+
+            if too_close_to_humans:
+                # Adjust path to go around humans
+                detour_pose = self.calculate_detour_around_human(pose, prev_pose, humans)
+                adapted_path.append(detour_pose)
+            else:
+                adapted_path.append(pose)
+
+        return adapted_path
+
+    def calculate_detour_around_human(self, current_pose, prev_pose, humans):
+        """Calculate detour path around humans"""
+        # Find the best detour direction to avoid humans
+        best_detour = current_pose  # Default to original pose
+        min_human_distance = float('inf')
+
+        # Try different detour directions
+        detour_offsets = [
+            (0.3, 0.3),   # Northeast
+            (0.3, -0.3),  # Southeast
+            (-0.3, 0.3),  # Northwest
+            (-0.3, -0.3), # Southwest
+            (0.5, 0),     # East
+            (-0.5, 0),    # West
+            (0, 0.5),     # North
+            (0, -0.5),    # South
+        ]
+
+        for dx, dy in detour_offsets:
+            detour_pose = Pose()
+            detour_pose.position.x = current_pose.position.x + dx
+            detour_pose.position.y = current_pose.position.y + dy
+            detour_pose.position.z = current_pose.position.z
+
+            # Calculate minimum distance to any human
+            min_dist_to_humans = min(
+                self.calculate_distance_2d(detour_pose.position, h.position) for h in humans
+            )
+
+            if min_dist_to_humans > min_human_distance:
+                min_human_distance = min_dist_to_humans
+                best_detour = detour_pose
+
+        return best_detour
+
+class HumanTracker:
+    """Track individual human movement and predict future positions"""
+
+    def __init__(self, initial_position):
+        self.position_history = [initial_position]
+        self.velocity = None
+        self.predicted_path = []
+
+    def update(self, position, velocity=None):
+        """Update tracker with new position and velocity"""
+        self.position_history.append(position)
+
+        if velocity is not None:
+            self.velocity = velocity
+        else:
+            # Calculate velocity from history if not provided
+            if len(self.position_history) >= 2:
+                dt = 0.1  # Assume 10Hz update rate
+                prev_pos = self.position_history[-2]
+                self.velocity = (
+                    (position.x - prev_pos.x) / dt,
+                    (position.y - prev_pos.y) / dt,
+                    (position.z - prev_pos.z) / dt
+                )
+
+    def get_current_position(self):
+        """Get current estimated position"""
+        return self.position_history[-1] if self.position_history else None
+
+    def predict_future_position(self, time_ahead):
+        """Predict human position in the future"""
+        if self.velocity is not None and len(self.position_history) >= 1:
+            current_pos = self.position_history[-1]
+            predicted_x = current_pos.x + self.velocity[0] * time_ahead
+            predicted_y = current_pos.y + self.velocity[1] * time_ahead
+            predicted_z = current_pos.z + self.velocity[2] * time_ahead
+
+            return Point(predicted_x, predicted_y, predicted_z)
+
+        return self.get_current_position()  # Fallback to current position
+```
+
+## Emergency Safety Systems
+
+### Emergency Stop and Recovery
+```python
+# Example: Emergency safety systems
+class EmergencySafetySystem:
+    """Emergency safety system for humanoid robots"""
+
+    def __init__(self):
+        self.emergency_level = 0  # 0 = normal, 1 = caution, 2 = warning, 3 = danger
+        self.emergency_actions = []
+        self.safety_engaged = False
+        self.last_emergency_time = None
+        self.emergency_cooldown = 2.0  # seconds between emergency actions
+
+        # Safety parameters
+        self.collision_imminent_threshold = 0.2  # meters
+        self.high_risk_threshold = 0.5           # meters
+        self.balance_threshold = 0.1             # stability measure
+
+    def assess_emergency_situation(self, collision_data, balance_data, humans_nearby):
+        """Assess current emergency level"""
+        # Evaluate collision risk
+        collision_risk = self.evaluate_collision_risk(collision_data)
+
+        # Evaluate balance risk
+        balance_risk = self.evaluate_balance_risk(balance_data)
+
+        # Evaluate human safety risk
+        human_risk = self.evaluate_human_safety_risk(humans_nearby)
+
+        # Combine risks to determine overall emergency level
+        overall_risk = max(collision_risk, balance_risk, human_risk)
+
+        if overall_risk >= 0.9:
+            return 3  # Danger
+        elif overall_risk >= 0.7:
+            return 2  # Warning
+        elif overall_risk >= 0.4:
+            return 1  # Caution
+        else:
+            return 0  # Normal
+
+    def evaluate_collision_risk(self, collision_data):
+        """Evaluate collision risk from collision detection data"""
+        if not collision_data:
+            return 0.0
+
+        # Calculate risk based on closest collision threat
+        min_distance = min([data['distance'] for data in collision_data], default=float('inf'))
+
+        if min_distance <= self.collision_imminent_threshold:
+            return 0.9  # Very high risk
+        elif min_distance <= self.high_risk_threshold:
+            return 0.7  # High risk
+        else:
+            # Lower risk based on distance
+            risk_factor = (self.high_risk_threshold - min_distance) / self.high_risk_threshold
+            return max(0.0, risk_factor)
+
+    def evaluate_balance_risk(self, balance_data):
+        """Evaluate risk based on robot balance state"""
+        if not balance_data:
+            return 0.0
+
+        # Balance risk increases as stability decreases
+        stability = balance_data.get('stability', 1.0)  # 0 = unstable, 1 = stable
+        lean_angle = balance_data.get('lean_angle', 0.0)  # radians
+
+        # Higher risk with higher lean angle
+        lean_risk = min(1.0, lean_angle / (np.pi / 6))  # Risk at 30-degree lean
+
+        # Combined risk
+        balance_risk = max(1.0 - stability, lean_risk)
+        return balance_risk
+
+    def evaluate_human_safety_risk(self, humans_nearby):
+        """Evaluate risk to humans in the vicinity"""
+        if not humans_nearby:
+            return 0.0
+
+        max_human_risk = 0.0
+
+        for human in humans_nearby:
+            distance = self.calculate_human_distance(human)
+
+            if distance < 0.3:  # Very close
+                human_risk = 0.9
+            elif distance < 0.8:  # Close
+                human_risk = 0.7
+            elif distance < 1.5:  # Within reach
+                human_risk = 0.4
+            else:  # Far away
+                human_risk = 0.1
+
+            max_human_risk = max(max_human_risk, human_risk)
+
+        return max_human_risk
+
+    def trigger_emergency_response(self, emergency_level, reason="Unknown"):
+        """Trigger appropriate emergency response based on level"""
+        current_time = time.time()
+
+        # Check cooldown to prevent spam
+        if (self.last_emergency_time and
+            current_time - self.last_emergency_time < self.emergency_cooldown):
+            return
+
+        self.last_emergency_time = current_time
+
+        if emergency_level >= 3:  # Danger
+            self.execute_danger_protocol(reason)
+        elif emergency_level >= 2:  # Warning
+            self.execute_warning_protocol(reason)
+        elif emergency_level >= 1:  # Caution
+            self.execute_caution_protocol(reason)
+
+    def execute_danger_protocol(self, reason):
+        """Execute protocol for dangerous situations"""
+        self.get_logger().error(f"DANGER: Emergency protocol activated - {reason}")
+
+        # Immediate actions
+        self.immediate_stop()           # Stop all motion
+        self.activate_balance_control() # Engage balance control
+        self.sound_alarm()              # Alert nearby humans
+        self.prepare_for_fall()         # Prepare for potential fall
+
+        # Log emergency
+        self.log_emergency_event("DANGER", reason)
+
+    def execute_warning_protocol(self, reason):
+        """Execute protocol for warning situations"""
+        self.get_logger().warn(f"WARNING: Emergency protocol activated - {reason}")
+
+        # Warning actions
+        self.reduce_speed()             # Reduce navigation speed
+        self.increase_caution()         # More careful navigation
+        self.announce_intent()          # Signal intentions to humans
+
+        # Log event
+        self.log_emergency_event("WARNING", reason)
+
+    def execute_caution_protocol(self, reason):
+        """Execute protocol for caution situations"""
+        self.get_logger().info(f"CAUTION: Emergency protocol activated - {reason}")
+
+        # Caution actions
+        self.monitor_closely()          # Increased monitoring
+        self.plan_alternative_route()   # Consider alternative paths
+
+        # Log event
+        self.log_emergency_event("CAUTION", reason)
+
+    def immediate_stop(self):
+        """Immediately stop all robot motion"""
+        # Send zero velocity commands
+        stop_cmd = Twist()
+        stop_cmd.linear.x = 0.0
+        stop_cmd.linear.y = 0.0
+        stop_cmd.linear.z = 0.0
+        stop_cmd.angular.x = 0.0
+        stop_cmd.angular.y = 0.0
+        stop_cmd.angular.z = 0.0
+
+        # Publish stop command
+        self.velocity_cmd_pub.publish(stop_cmd)
+
+    def activate_balance_control(self):
+        """Activate emergency balance control"""
+        # Engage balance recovery controllers
+        self.balance_controller.emergency_balance_recovery()
+
+    def sound_alarm(self):
+        """Sound alarm to alert nearby humans"""
+        # This would interface with audio system
+        pass
+
+    def prepare_for_fall(self):
+        """Prepare robot for potential fall"""
+        # Move arms for protection
+        # Adjust posture for safer fall
+        # Prepare emergency shutdown
+        pass
+
+    def reduce_speed(self):
+        """Reduce navigation speed for safety"""
+        self.speed_limit *= 0.5  # Reduce to 50% of normal speed
+
+    def increase_caution(self):
+        """Increase cautious behavior"""
+        self.caution_level += 1
+        self.update_safety_parameters()
+
+    def announce_intent(self):
+        """Announce robot intentions to nearby humans"""
+        # Use speech synthesis or visual indicators
+        pass
+
+    def monitor_closely(self):
+        """Increase monitoring frequency"""
+        self.monitoring_frequency *= 2
+
+    def plan_alternative_route(self):
+        """Plan alternative route to avoid risk"""
+        # Recalculate path to avoid risky areas
+        pass
+
+    def log_emergency_event(self, level, reason):
+        """Log emergency event for analysis"""
+        timestamp = time.time()
+        event = {
+            'timestamp': timestamp,
+            'level': level,
+            'reason': reason,
+            'robot_state': self.get_current_robot_state(),
+            'environment_state': self.get_current_environment_state()
+        }
+
+        self.emergency_log.append(event)
+```
+
+## Isaac ROS Safety Integration
+
+### Isaac ROS Safety Components
+```python
+# Example: Isaac ROS integration for safety
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import Image, LaserScan, PointCloud2
+from geometry_msgs.msg import Twist
+from std_msgs.msg import Bool
+from builtin_interfaces.msg import Duration
+
+class IsaacROSSafetyIntegrator(Node):
+    """Integration of safety systems with Isaac ROS components"""
+
+    def __init__(self):
+        super().__init__('isaac_ros_safety_integrator')
+
+        # Isaac ROS safety components
+        self.gpu_collision_detector = self.initialize_gpu_collision_detector()
+        self.safety_monitor = SafetyMonitor()
+        self.emergency_handler = EmergencySafetySystem()
+
+        # Publishers and subscribers
+        self.safety_status_pub = self.create_publisher(Bool, '/safety/status', 10)
+        self.emergency_stop_pub = self.create_publisher(Bool, '/emergency_stop', 10)
+        self.safe_velocity_pub = self.create_publisher(Twist, '/safe_cmd_vel', 10)
+
+        # Isaac ROS sensor subscriptions
+        self.rgb_sub = self.create_subscription(Image, '/isaac/sim/camera/rgb', self.rgb_callback, 10)
+        self.depth_sub = self.create_subscription(Image, '/isaac/sim/camera/depth', self.depth_callback, 10)
+        self.lidar_sub = self.create_subscription(LaserScan, '/isaac/sim/lidar', self.lidar_callback, 10)
+        self.pointcloud_sub = self.create_subscription(PointCloud2, '/isaac/sim/pointcloud', self.pc_callback, 10)
+
+        # Velocity command subscription (to monitor and potentially override)
+        self.velocity_cmd_sub = self.create_subscription(Twist, '/cmd_vel', self.velocity_cmd_callback, 10)
+
+        # Safety timer
+        self.safety_timer = self.create_timer(0.1, self.safety_check)  # 10 Hz safety check
+
+        # State variables
+        self.current_velocity_cmd = Twist()
+        self.safety_engaged = False
+        self.last_safe_cmd = Twist()
+
+    def initialize_gpu_collision_detector(self):
+        """Initialize GPU-accelerated collision detection"""
+        if cp.cuda.is_available():
+            self.get_logger().info("Initializing GPU-accelerated safety system")
+            return GPUCollisionDetector()
+        else:
+            self.get_logger().warn("GPU not available, using CPU safety system")
+            return CPUCollisionDetector()
+
+    def rgb_callback(self, msg):
+        """Handle RGB camera data for safety"""
+        # Use for human detection and classification
+        pass
+
+    def depth_callback(self, msg):
+        """Handle depth camera data for 3D collision detection"""
+        # Process depth data for obstacle detection
+        self.process_depth_for_collision_detection(msg)
+
+    def lidar_callback(self, msg):
+        """Handle LiDAR data for safety"""
+        # Use for proximity detection and mapping
+        obstacles = self.detect_obstacles_lidar(msg)
+        self.safety_monitor.update_obstacle_data(obstacles)
+
+    def pc_callback(self, msg):
+        """Handle point cloud data for comprehensive safety"""
+        # Use for detailed 3D environment understanding
+        collision_data = self.gpu_collision_detector.detect_collisions_3d(msg)
+        self.emergency_handler.check_for_emergencies(collision_data)
+
+    def velocity_cmd_callback(self, msg):
+        """Monitor velocity commands for safety violations"""
+        self.current_velocity_cmd = msg
+        self.check_velocity_safety(msg)
+
+    def safety_check(self):
+        """Periodic safety check"""
+        # Perform comprehensive safety assessment
+        safety_status = self.perform_safety_assessment()
+
+        # Publish safety status
+        status_msg = Bool()
+        status_msg.data = safety_status
+        self.safety_status_pub.publish(status_msg)
+
+        # Check if emergency stop is needed
+        if not safety_status:
+            self.trigger_emergency_stop()
+
+    def perform_safety_assessment(self):
+        """Perform comprehensive safety assessment"""
+        # Check multiple safety factors
+        collision_free = self.safety_monitor.is_collision_free()
+        balance_safe = self.safety_monitor.is_balance_safe()
+        human_safe = self.safety_monitor.is_human_safe()
+
+        overall_safe = collision_free and balance_safe and human_safe
+
+        return overall_safe
+
+    def check_velocity_safety(self, cmd_vel):
+        """Check if velocity command is safe"""
+        # Check if commanded velocity is within safe limits
+        linear_speed = np.sqrt(cmd_vel.linear.x**2 + cmd_vel.linear.y**2 + cmd_vel.linear.z**2)
+        angular_speed = np.sqrt(cmd_vel.angular.x**2 + cmd_vel.angular.y**2 + cmd_vel.angular.z**2)
+
+        # Compare with safety limits
+        max_safe_linear = 0.3  # m/s
+        max_safe_angular = 0.5  # rad/s
+
+        if linear_speed > max_safe_linear or angular_speed > max_safe_angular:
+            self.get_logger().warn(f"Unsafe velocity command detected: linear={linear_speed}, angular={angular_speed}")
+            return False
+
+        return True
+
+    def trigger_emergency_stop(self):
+        """Trigger emergency stop procedure"""
+        if not self.safety_engaged:
+            self.get_logger().error("EMERGENCY STOP TRIGGERED!")
+
+            # Send stop command
+            stop_cmd = Twist()
+            self.safe_velocity_pub.publish(stop_cmd)
+
+            # Publish emergency stop signal
+            emergency_msg = Bool()
+            emergency_msg.data = True
+            self.emergency_stop_pub.publish(emergency_msg)
+
+            self.safety_engaged = True
+
+    def process_depth_for_collision_detection(self, depth_msg):
+        """Process depth data for collision detection"""
+        # Convert depth image to 3D points
+        points_3d = self.depth_to_3d_points(depth_msg)
+
+        # Check for obstacles in robot's path
+        path_clear = self.check_path_clear_3d(points_3d)
+
+        if not path_clear:
+            self.get_logger().warn("Obstacle detected in path!")
+
+    def depth_to_3d_points(self, depth_msg):
+        """Convert depth image to 3D point cloud"""
+        # Implementation would convert depth image to 3D coordinates
+        # using camera intrinsic parameters
+        pass
+
+    def check_path_clear_3d(self, points_3d):
+        """Check if robot's planned path is clear of obstacles"""
+        # Check if any points are in the robot's projected path
+        # based on current heading and planned trajectory
+        pass
+```
+
+## Safety Validation and Testing
+
+### Safety Validation Framework
+```python
+# Example: Safety validation testing
+class SafetyValidationFramework:
+    """Framework for validating safety systems"""
+
+    def __init__(self):
+        self.test_scenarios = [
+            "static_obstacle_avoidance",
+            "moving_human_interaction",
+            "narrow_passage_navigation",
+            "crowd_navigation",
+            "emergency_stop_validation",
+            "balance_failure_recovery",
+            "sensor_failure_handling"
+        ]
+
+    def validate_static_obstacle_avoidance(self):
+        """Validate static obstacle avoidance"""
+        # Set up test environment with static obstacles
+        obstacles = self.create_test_obstacles()
+
+        # Navigate towards obstacles
+        success_count = 0
+        total_tests = 10
+
+        for i in range(total_tests):
+            # Generate random start/goal with obstacle in path
+            start, goal = self.generate_scenario_with_obstacle(obstacles[i % len(obstacles)])
+
+            # Execute navigation
+            result = self.execute_navigation_with_obstacles(start, goal, obstacles[i % len(obstacles)])
+
+            if result.success and result.collision_free:
+                success_count += 1
+
+        success_rate = success_count / total_tests
+        self.get_logger().info(f"Static obstacle avoidance success rate: {success_rate:.2%}")
+
+        assert success_rate >= 0.95, f"Static obstacle avoidance failed: {success_rate:.2%} < 95%"
+
+        return success_rate
+
+    def validate_moving_human_interaction(self):
+        """Validate safe interaction with moving humans"""
+        # Create moving human scenarios
+        human_trajectories = self.create_moving_human_scenarios()
+
+        success_count = 0
+        total_tests = 15
+
+        for i in range(total_tests):
+            human_traj = human_trajectories[i % len(human_trajectories)]
+
+            # Test robot navigation with moving human
+            result = self.execute_navigation_with_moving_human(human_traj)
+
+            if (result.success and
+                result.min_human_distance > 0.8 and  # Maintained personal space
+                result.no_collisions):
+                success_count += 1
+
+        success_rate = success_count / total_tests
+        self.get_logger().info(f"Moving human interaction success rate: {success_rate:.2%}")
+
+        assert success_rate >= 0.90, f"Moving human interaction failed: {success_rate:.2%} < 90%"
+
+        return success_rate
+
+    def validate_emergency_stop_system(self):
+        """Validate emergency stop system response time"""
+        # Test various emergency scenarios
+        emergency_scenarios = [
+            "sudden_obstacle_appears",
+            "human_enters_safety_zone",
+            "balance_compromise_detected",
+            "sensor_data_anomaly"
+        ]
+
+        response_times = []
+
+        for scenario in emergency_scenarios:
+            # Trigger emergency scenario
+            start_time = time.time()
+            self.trigger_emergency_scenario(scenario)
+
+            # Measure response time
+            response_time = self.measure_emergency_response_time()
+            response_times.append(response_time)
+
+            self.get_logger().info(f"Emergency response time for {scenario}: {response_time:.3f}s")
+
+        avg_response_time = sum(response_times) / len(response_times)
+        max_response_time = max(response_times)
+
+        self.get_logger().info(f"Average emergency response time: {avg_response_time:.3f}s")
+        self.get_logger().info(f"Maximum emergency response time: {max_response_time:.3f}s")
+
+        # Validate response time requirements
+        assert avg_response_time <= 0.1, f"Average response time too slow: {avg_response_time}s > 0.1s"
+        assert max_response_time <= 0.2, f"Maximum response time too slow: {max_response_time}s > 0.2s"
+
+        return avg_response_time, max_response_time
+
+    def create_test_obstacles(self):
+        """Create standardized test obstacles"""
+        obstacles = []
+
+        # Various obstacle types and configurations
+        for i in range(5):
+            obstacle = {
+                'position': (2.0 + i*0.5, 0.0, 0.0),  # Line of obstacles
+                'size': (0.3, 0.3, 1.8),  # Width, depth, height
+                'type': 'static'
+            }
+            obstacles.append(obstacle)
+
+        return obstacles
+
+    def generate_scenario_with_obstacle(self, obstacle):
+        """Generate navigation scenario with obstacle"""
+        # Create start position before obstacle
+        start = (0.0, 0.0, 0.0)
+
+        # Create goal position after obstacle
+        goal = (4.0, 0.0, 0.0)
+
+        return start, goal
+
+    def execute_navigation_with_obstacles(self, start, goal, obstacle):
+        """Execute navigation in obstacle scenario"""
+        # This would interface with the actual navigation system
+        # to test obstacle avoidance capabilities
+        pass
+
+    def create_moving_human_scenarios(self):
+        """Create standardized moving human scenarios"""
+        scenarios = []
+
+        # Crossing path scenario
+        crossing_scenario = {
+            'path': [(0, -2), (0, 2)],  # Human crosses robot path
+            'speed': 1.0,  # m/s
+            'start_time': 0.0
+        }
+        scenarios.append(crossing_scenario)
+
+        # Head-on approach scenario
+        headon_scenario = {
+            'path': [(3, 0), (-1, 0)],  # Human approaches robot head-on
+            'speed': 1.2,  # m/s
+            'start_time': 0.0
+        }
+        scenarios.append(headon_scenario)
+
+        # Parallel walking scenario
+        parallel_scenario = {
+            'path': [(-2, 0.5), (4, 0.5)],  # Human walks parallel to robot
+            'speed': 1.0,  # m/s
+            'start_time': 0.5  # Start slightly delayed
+        }
+        scenarios.append(parallel_scenario)
+
+        return scenarios
+
+    def execute_navigation_with_moving_human(self, human_trajectory):
+        """Execute navigation with moving human"""
+        # This would test the robot's ability to navigate
+        # safely around moving humans
+        pass
+
+    def trigger_emergency_scenario(self, scenario):
+        """Trigger specific emergency scenario"""
+        # Implementation would simulate the emergency scenario
+        # and measure the system's response
+        pass
+
+    def measure_emergency_response_time(self):
+        """Measure time from emergency detection to action"""
+        # This would measure the actual response time
+        # of the safety system
+        pass
+```
+
+## Configuration and Parameters
+
+### Safety Configuration
+```yaml
+# Safety and collision avoidance configuration
+collision_avoidance:
+  ros__parameters:
+    # General safety parameters
+    safety:
+      enable_collision_detection: true
+      enable_social_navigation: true
+      enable_emergency_stop: true
+      collision_threshold: 0.2  # meters
+      warning_threshold: 0.5    # meters
+      safety_margin: 0.3        # additional safety buffer
+
+    # Human detection and tracking
+    human_detection:
+      enable_human_tracking: true
+      human_detection_threshold: 0.7
+      tracking_max_age: 5.0     # seconds to keep track of lost humans
+      prediction_horizon: 2.0   # seconds for human movement prediction
+
+    # Social navigation parameters
+    social_navigation:
+      personal_space_radius: 0.8  # meters
+      social_zone_radius: 1.2     # meters
+      public_zone_radius: 3.6     # meters
+      enable_social_aware_planning: true
+      social_cost_multiplier: 2.0
+
+    # Emergency response
+    emergency:
+      danger_threshold: 0.9
+      warning_threshold: 0.7
+      caution_threshold: 0.4
+      emergency_stop_timeout: 2.0  # seconds
+      cooldown_period: 1.0         # seconds between emergency actions
+
+    # Isaac ROS integration
+    isaac_ros:
+      enable_gpu_collision_detection: true
+      gpu_device_id: 0
+      enable_tensorrt: true
+      tensorrt_precision: "fp16"
+      collision_detection_frequency: 10.0  # Hz
+
+    # Performance parameters
+    performance:
+      max_processing_time_ms: 50.0  # ms per safety check
+      enable_adaptive_processing: true
+      processing_budget_ms: 45.0
+      enable_parallel_processing: true
+      thread_count: 4
+```
+
+## Summary
+
+Collision avoidance and safety constraints for humanoid robots require a multi-layered approach that considers both physical safety and social norms. The system must detect and classify various types of obstacles and humans, predict their movements, and plan safe trajectories that respect personal space and social navigation conventions. Emergency safety systems provide additional protection through immediate stop capabilities and balance recovery. The integration with Isaac ROS enables GPU acceleration for real-time performance while maintaining the high safety standards required for humanoid robots operating in human environments. Proper validation and testing ensure the safety systems perform reliably across various scenarios.

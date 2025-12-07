@@ -1,0 +1,50 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <!-- LiDAR Sensor Configuration -->
+  <xacro:macro name="lidar_sensor" params="name parent_link *origin topic update_rate samples min_angle max_angle min_range max_range resolution gaussian_noise">
+    <gazebo reference="${parent_link}">
+      <sensor name="${name}" type="ray">
+        <always_on>true</always_on>
+        <update_rate>${update_rate}</update_rate>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>${samples}</samples>
+              <resolution>${resolution}</resolution>
+              <min_angle>${min_angle}</min_angle>
+              <max_angle>${max_angle}</max_angle>
+            </horizontal>
+          </scan>
+          <range>
+            <min>${min_range}</min>
+            <max>${max_range}</max>
+            <resolution>0.01</resolution>
+          </range>
+        </ray>
+        <plugin name="${name}_controller" filename="libgazebo_ros_laser.so">
+          <topicName>${topic}</topicName>
+          <frameName>${parent_link}</frameName>
+          <min_range>${min_range}</min_range>
+          <max_range>${max_range}</max_range>
+          <gaussian_noise>${gaussian_noise}</gaussian_noise>
+        </plugin>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+
+  <!-- Example usage of the LiDAR macro -->
+  <xacro:lidar_sensor
+    name="front_lidar"
+    parent_link="lidar_mount"
+    topic="/front_scan"
+    update_rate="10"
+    samples="720"
+    min_angle="${-pi/2}"
+    max_angle="${pi/2}"
+    min_range="0.1"
+    max_range="30.0"
+    resolution="1"
+    gaussian_noise="0.01">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </xacro:lidar_sensor>
+</robot>

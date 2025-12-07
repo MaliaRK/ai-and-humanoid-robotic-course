@@ -1,0 +1,755 @@
+---
+title: "Mapping and Localization for Humanoid Robots"
+description: "Advanced mapping and localization techniques optimized for humanoid robot navigation"
+sidebar_position: 2
+---
+
+# Mapping and Localization for Humanoid Robots
+
+## Introduction
+
+Mapping and localization are fundamental capabilities for autonomous humanoid robots, enabling them to understand their environment and navigate effectively. For humanoid robots, these capabilities must account for the unique challenges of bipedal locomotion, human-scale environments, and the need for real-time performance while maintaining balance.
+
+## Mapping Challenges for Humanoid Robots
+
+### Human-Scale Considerations
+- **Height Advantage**: Humanoid robots can perceive environments from eye-level
+- **Vertical Structure**: Ability to navigate stairs, ramps, and multi-level structures
+- **Social Navigation**: Mapping for human-centric spaces and social norms
+- **Personal Space**: Awareness of human personal space requirements
+
+### Dynamic Environment Mapping
+- **Moving Humans**: Tracking and predicting human movement patterns
+- **Temporary Obstacles**: Furniture rearrangement, doors opening/closing
+- **Lighting Changes**: Adapting to day/night and changing lighting conditions
+- **Clutter Dynamics**: Objects moved by humans during robot operation
+
+### Multi-Modal Mapping
+```python
+# Example: Multi-modal mapping for humanoid robots
+import numpy as np
+import cv2
+from nav_msgs.msg import OccupancyGrid
+from sensor_msgs.msg import PointCloud2
+from geometry_msgs.msg import Pose
+from tf2_ros import TransformListener
+import open3d as o3d
+
+class HumanoidMultiModalMapper:
+    def __init__(self, node):
+        self.node = node
+        self.map_resolution = 0.05  # meters per cell
+        self.map_size = [20.0, 20.0]  # meters
+        self.local_map_size = [6.0, 6.0]  # meters for local map
+
+        # Multi-modal data fusion
+        self.occupancy_grid = None
+        self.point_cloud_map = o3d.geometry.PointCloud()
+        self.semantic_map = None
+
+        # Human detection and tracking
+        self.human_tracker = HumanTracker()
+        self.social_zones = []
+
+    def integrate_multimodal_data(self, lidar_data, camera_data, depth_data, pose):
+        """Integrate data from multiple sensors for comprehensive mapping"""
+        # Process LiDAR data for occupancy grid
+        lidar_map_update = self.process_lidar_data(lidar_data, pose)
+
+        # Process camera data for semantic information
+        semantic_update = self.process_camera_data(camera_data, depth_data, pose)
+
+        # Process depth data for 3D structure
+        pointcloud_update = self.process_depth_data(depth_data, pose)
+
+        # Fuse all modalities
+        self.fuse_modality_updates(lidar_map_update, semantic_update, pointcloud_update)
+
+    def process_lidar_data(self, lidar_scan, robot_pose):
+        """Process LiDAR data for occupancy grid mapping"""
+        # Convert scan to world coordinates
+        world_points = self.transform_scan_to_world(lidar_scan, robot_pose)
+
+        # Update occupancy grid with scan data
+        grid_update = self.update_occupancy_grid(world_points)
+
+        return grid_update
+
+    def process_camera_data(self, image, depth, robot_pose):
+        """Process camera data for semantic mapping"""
+        # Detect and classify objects in the scene
+        objects = self.detect_objects_in_image(image)
+
+        # Estimate 3D positions using depth data
+        object_positions = self.estimate_3d_positions(objects, depth)
+
+        # Update semantic map
+        semantic_update = self.update_semantic_map(objects, object_positions, robot_pose)
+
+        return semantic_update
+
+    def process_depth_data(self, depth_image, robot_pose):
+        """Process depth data for 3D mapping"""
+        # Convert depth image to 3D point cloud
+        pointcloud = self.depth_to_pointcloud(depth_image, robot_pose)
+
+        # Filter and clean point cloud
+        filtered_cloud = self.filter_pointcloud(pointcloud)
+
+        return filtered_cloud
+
+    def fuse_modality_updates(self, lidar_update, semantic_update, pointcloud_update):
+        """Fuse updates from different modalities"""
+        # Combine occupancy grid with semantic information
+        self.update_global_map(lidar_update, semantic_update)
+
+        # Integrate point cloud data for 3D structure
+        self.integrate_pointcloud_data(pointcloud_update)
+
+        # Update social zones based on human detections
+        self.update_social_zones()
+
+    def update_social_zones(self):
+        """Update social navigation zones based on human tracking"""
+        # Detect humans and create personal space buffers
+        humans = self.human_tracker.get_tracked_humans()
+
+        for human in humans:
+            # Create personal space around human
+            personal_space = self.create_personal_space_zone(human.position)
+            self.social_zones.append(personal_space)
+
+            # Update costmap to avoid personal space
+            self.update_costmap_with_social_constraint(personal_space)
+```
+
+## Localization Challenges for Humanoid Robots
+
+### Balance-Aware Localization
+- **Dynamic Motion**: Accounting for walking-induced motion during localization
+- **Sensor Fusion**: Combining data from multiple sensors while walking
+- **IMU Integration**: Using IMU data to improve pose estimation during motion
+- **Kinematic Constraints**: Incorporating leg kinematics for pose estimation
+
+### Humanoid-Specific Localization Pipeline
+```python
+# Example: Humanoid localization pipeline
+import numpy as np
+from scipy.spatial.transform import Rotation as R
+from geometry_msgs.msg import PoseWithCovarianceStamped
+from sensor_msgs.msg import Imu, JointState
+from tf2_ros import TransformListener
+import particle_filters as pf  # Hypothetical particle filter library
+
+class HumanoidLocalization:
+    def __init__(self, node):
+        self.node = node
+        self.particle_filter = pf.ParticleFilter(state_dim=6)  # x, y, z, roll, pitch, yaw
+        self.initialized = False
+        self.pose_estimate = np.zeros(6)  # [x, y, z, roll, pitch, yaw]
+        self.pose_covariance = np.eye(6) * 0.1  # Initial uncertainty
+
+        # Motion model for humanoid gait
+        self.motion_model = HumanoidMotionModel()
+
+        # Sensor models
+        self.lidar_model = LidarLikelihoodFieldModel()
+        self.visual_model = VisualFeatureBasedModel()
+        self.imu_model = IMUModel()
+        self.kinematic_model = KinematicModel()
+
+    def initialize_pose(self, initial_pose, uncertainty=0.1):
+        """Initialize localization with initial pose estimate"""
+        self.pose_estimate[:3] = [initial_pose.position.x,
+                                  initial_pose.position.y,
+                                  initial_pose.position.z]
+
+        # Convert quaternion to euler angles
+        quat = [initial_pose.orientation.x, initial_pose.orientation.y,
+                initial_pose.orientation.z, initial_pose.orientation.w]
+        r = R.from_quat(quat)
+        self.pose_estimate[3:] = r.as_euler('xyz')
+
+        # Initialize particle filter
+        self.particle_filter.initialize(
+            mean=self.pose_estimate,
+            cov=np.eye(6) * uncertainty
+        )
+        self.initialized = True
+
+    def update_localization(self, sensor_data, dt):
+        """Update localization with new sensor data"""
+        if not self.initialized:
+            self.node.get_logger().warn("Localization not initialized")
+            return
+
+        # Predict step: motion model
+        predicted_particles = self.predict_motion(dt, sensor_data)
+
+        # Update step: sensor likelihood
+        updated_weights = self.update_with_sensors(predicted_particles, sensor_data)
+
+        # Resample particles
+        resampled_particles = self.resample_particles(predicted_particles, updated_weights)
+
+        # Estimate pose from particles
+        self.pose_estimate, self.pose_covariance = self.estimate_pose_from_particles(resampled_particles)
+
+        return self.pose_estimate, self.pose_covariance
+
+    def predict_motion(self, dt, sensor_data):
+        """Predict particle poses based on motion model"""
+        # Get motion information from various sources
+        imu_motion = self.extract_imu_motion(sensor_data.get('imu'))
+        kinematic_motion = self.extract_kinematic_motion(sensor_data.get('joints'))
+        visual_odometry = sensor_data.get('visual_odometry', np.zeros(6))
+
+        # Combine motion estimates
+        combined_motion = self.fuse_motion_estimates(
+            imu_motion, kinematic_motion, visual_odometry
+        )
+
+        # Apply motion to particles
+        predicted_particles = self.particle_filter.predict(
+            motion=combined_motion,
+            dt=dt,
+            motion_noise=self.get_motion_noise()
+        )
+
+        return predicted_particles
+
+    def extract_imu_motion(self, imu_data):
+        """Extract motion information from IMU data"""
+        if imu_data is None:
+            return np.zeros(6)
+
+        # Integrate IMU data for position/velocity changes
+        linear_acc = np.array([
+            imu_data.linear_acceleration.x,
+            imu_data.linear_acceleration.y,
+            imu_data.linear_acceleration.z
+        ])
+
+        angular_vel = np.array([
+            imu_data.angular_velocity.x,
+            imu_data.angular_velocity.y,
+            imu_data.angular_velocity.z
+        ])
+
+        # Integrate to get pose change
+        position_change = 0.5 * linear_acc * dt**2
+        orientation_change = angular_vel * dt
+
+        motion_vector = np.concatenate([position_change, orientation_change])
+        return motion_vector
+
+    def extract_kinematic_motion(self, joint_data):
+        """Extract motion from leg kinematics"""
+        if joint_data is None:
+            return np.zeros(6)
+
+        # Calculate body motion based on leg movements
+        # This would involve forward kinematics and gait analysis
+        body_motion = self.kinematic_model.calculate_body_motion(joint_data)
+        return body_motion
+
+    def update_with_sensors(self, particles, sensor_data):
+        """Update particle weights based on sensor likelihood"""
+        weights = np.ones(len(particles))
+
+        # Update with LiDAR data
+        if 'lidar' in sensor_data:
+            lidar_weights = self.lidar_model.calculate_likelihood(
+                particles, sensor_data['lidar']
+            )
+            weights *= lidar_weights
+
+        # Update with visual features
+        if 'features' in sensor_data:
+            visual_weights = self.visual_model.calculate_likelihood(
+                particles, sensor_data['features']
+            )
+            weights *= visual_weights
+
+        # Update with IMU data
+        if 'imu' in sensor_data:
+            imu_weights = self.imu_model.calculate_likelihood(
+                particles, sensor_data['imu']
+            )
+            weights *= imu_weights
+
+        # Normalize weights
+        weights = weights / np.sum(weights)
+        return weights
+
+    def get_motion_noise(self):
+        """Get motion noise based on humanoid-specific factors"""
+        # Higher noise during walking
+        # Lower noise when stationary
+        # Account for balance adjustments
+        noise = np.diag([
+            0.01,  # x position noise
+            0.01,  # y position noise
+            0.005, # z position noise
+            0.02,  # roll noise
+            0.02,  # pitch noise
+            0.03   # yaw noise
+        ])
+        return noise
+```
+
+## Humanoid-Specific Mapping Algorithms
+
+### Gait-Aware Mapping
+```python
+# Example: Gait-aware mapping for humanoid robots
+class GaitAwareMapper:
+    def __init__(self):
+        self.gait_phase = 0.0
+        self.step_count = 0
+        self.map_updates = []
+        self.gait_frequency = 2.0  # Hz (typical walking frequency)
+
+    def update_map_with_gait_awareness(self, sensor_data, robot_pose, gait_state):
+        """Update map considering current gait phase"""
+        # Determine if we're in a stable phase of gait
+        stable_phase = self.is_gait_phase_stable(gait_state)
+
+        if stable_phase:
+            # Perform detailed mapping during stable phases
+            map_update = self.create_detailed_map_update(sensor_data, robot_pose)
+            self.integrate_map_update(map_update)
+        else:
+            # Use conservative mapping during unstable phases
+            map_update = self.create_conservative_map_update(sensor_data, robot_pose)
+            self.integrate_map_update(map_update, conservative=True)
+
+    def is_gait_phase_stable(self, gait_state):
+        """Determine if current gait phase is stable for mapping"""
+        # Stable phases: double support, stance phase
+        # Unstable phases: single support, swing phase
+        current_phase = gait_state.phase
+        stance_start = gait_state.stance_start
+        stance_end = gait_state.stance_end
+
+        # Check if in relatively stable phase
+        return stance_start <= current_phase <= stance_end
+
+    def create_detailed_map_update(self, sensor_data, robot_pose):
+        """Create detailed map update during stable gait phases"""
+        # Use full sensor data for detailed mapping
+        detailed_map = self.process_full_sensor_data(sensor_data)
+
+        # Transform to global coordinates
+        global_map = self.transform_to_global_coordinates(detailed_map, robot_pose)
+
+        return global_map
+
+    def create_conservative_map_update(self, sensor_data, robot_pose):
+        """Create conservative map update during unstable gait phases"""
+        # Use only reliable features
+        reliable_features = self.extract_reliable_features(sensor_data)
+
+        # Apply more conservative updates
+        conservative_map = self.process_reliable_features(reliable_features)
+
+        # Transform to global coordinates
+        global_map = self.transform_to_global_coordinates(conservative_map, robot_pose)
+
+        return global_map
+```
+
+## Social Mapping and Navigation
+
+### Human-Aware Mapping
+```python
+# Example: Social mapping for humanoid robots
+class SocialMapper:
+    def __init__(self):
+        self.human_positions = {}  # Track human positions
+        self.social_zones = []     # Personal space zones
+        self.navigation_preferences = {}  # Human navigation patterns
+
+    def update_with_human_awareness(self, sensor_data, robot_pose):
+        """Update map with awareness of humans and social norms"""
+        # Detect humans in the environment
+        humans = self.detect_humans(sensor_data)
+
+        # Update human position tracking
+        self.update_human_positions(humans, robot_pose)
+
+        # Create social zones around humans
+        self.update_social_zones()
+
+        # Learn human navigation patterns
+        self.learn_navigation_patterns(humans)
+
+    def create_social_costmap(self):
+        """Create costmap considering social navigation norms"""
+        # Initialize costmap
+        social_costmap = np.zeros((100, 100))  # Example grid
+
+        # Add costs for violating personal space
+        for zone in self.social_zones:
+            self.add_personal_space_cost(social_costmap, zone)
+
+        # Add costs for inappropriate navigation behavior
+        self.add_social_norm_costs(social_costmap)
+
+        return social_costmap
+
+    def add_personal_space_cost(self, costmap, zone):
+        """Add cost for entering human personal space"""
+        # Personal space: intimate (0-0.45m), personal (0.45-1.2m), social (1.2-3.6m)
+        center_x, center_y = zone.center
+        radius = zone.radius
+
+        # Create circular cost area around human
+        for x in range(costmap.shape[0]):
+            for y in range(costmap.shape[1]):
+                dist = np.sqrt((x - center_x)**2 + (y - center_y)**2)
+
+                if dist < radius:
+                    # High cost for entering personal space
+                    costmap[x, y] = max(costmap[x, y], 200)
+                elif dist < radius + 0.5:  # Buffer zone
+                    # Medium cost for getting close to personal space
+                    costmap[x, y] = max(costmap[x, y], 100)
+
+    def add_social_norm_costs(self, costmap):
+        """Add costs for violating social navigation norms"""
+        # Examples of social navigation norms:
+        # - Don't cut between humans
+        # - Respect queuing behavior
+        # - Give way to humans moving quickly
+        # - Approach from appropriate angles
+
+        # Implementation would consider these factors
+        pass
+```
+
+## Localization in Human Environments
+
+### Human-Scale Localization
+```python
+# Example: Human-scale localization
+class HumanScaleLocalizer:
+    def __init__(self):
+        self.reference_objects = []  # Known objects at human eye level
+        self.floor_pattern_map = {}  # Floor patterns for localization
+        self.furniture_map = {}      # Fixed furniture for reference
+
+    def localize_in_human_environment(self, sensor_data, initial_estimate):
+        """Localize using human-environment-specific features"""
+        # Look for human-scale reference points
+        eye_level_features = self.extract_eye_level_features(sensor_data)
+
+        # Match with known reference objects
+        reference_matches = self.match_with_known_references(eye_level_features)
+
+        # Use floor patterns for fine localization
+        floor_pattern_match = self.match_floor_patterns(sensor_data)
+
+        # Combine all localization cues
+        combined_estimate = self.fuse_localization_cues(
+            initial_estimate,
+            reference_matches,
+            floor_pattern_match
+        )
+
+        return combined_estimate
+
+    def extract_eye_level_features(self, sensor_data):
+        """Extract features at human eye level (1.2-1.8m height)"""
+        # Extract features from camera data in eye-level region
+        image = sensor_data['image']
+        h, w, _ = image.shape
+
+        # Define eye-level region (approximately 1.2-1.8m)
+        eye_region_top = int(h * 0.3)  # Approximate eye level start
+        eye_region_bottom = int(h * 0.7)  # Approximate eye level end
+
+        eye_region = image[eye_region_top:eye_region_bottom, :]
+
+        # Extract features from eye-level region
+        features = self.feature_detector.detectAndCompute(eye_region, None)
+
+        # Adjust feature coordinates to full image frame
+        adjusted_features = []
+        for feature in features:
+            kp = cv2.KeyPoint(
+                x=feature.pt[0],
+                y=feature.pt[1] + eye_region_top,  # Adjust y coordinate
+                size=feature.size
+            )
+            adjusted_features.append(kp)
+
+        return adjusted_features
+
+    def match_with_known_references(self, current_features):
+        """Match current features with known reference objects"""
+        # Match features against database of known human-level objects
+        # Tables, chairs, door handles, wall art, etc.
+        matches = []
+
+        for ref_obj in self.reference_objects:
+            obj_matches = self.match_features_to_object(
+                current_features, ref_obj
+            )
+            if obj_matches:
+                matches.append({
+                    'object': ref_obj,
+                    'matches': obj_matches,
+                    'confidence': self.calculate_match_confidence(obj_matches)
+                })
+
+        return matches
+```
+
+## Performance Optimization
+
+### Real-Time Considerations
+```python
+# Example: Performance optimization for humanoid mapping/localization
+class OptimizedHumanoidMapper:
+    def __init__(self):
+        self.max_processing_time = 33.0  # 30 FPS = 33.3ms per frame
+        self.enable_adaptive_processing = True
+        self.map_resolution_levels = [0.1, 0.05, 0.025]  # Multi-resolution
+
+    def adaptive_map_update(self, sensor_data, robot_pose, available_time):
+        """Adaptively update map based on available processing time"""
+        start_time = time.time()
+
+        # Quick update if time is limited
+        if available_time < self.max_processing_time * 0.3:
+            return self.quick_map_update(sensor_data, robot_pose)
+
+        # Moderate update for medium time
+        elif available_time < self.max_processing_time * 0.7:
+            return self.moderate_map_update(sensor_data, robot_pose)
+
+        # Full update if sufficient time available
+        else:
+            return self.full_map_update(sensor_data, robot_pose)
+
+    def quick_map_update(self, sensor_data, robot_pose):
+        """Perform quick map update with minimal processing"""
+        # Only update most critical areas
+        # Use lowest resolution
+        # Only process most distinctive features
+        pass
+
+    def moderate_map_update(self, sensor_data, robot_pose):
+        """Perform moderate map update with balanced processing"""
+        # Update local area in detail
+        # Use medium resolution
+        # Process multiple sensor modalities
+        pass
+
+    def full_map_update(self, sensor_data, robot_pose):
+        """Perform comprehensive map update"""
+        # Update entire map area
+        # Use highest resolution
+        # Process all sensor modalities
+        # Perform loop closure
+        pass
+```
+
+## Integration with Isaac ROS
+
+### Isaac ROS Mapping Components
+```python
+# Example: Isaac ROS integration for mapping/localization
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import Image, LaserScan, PointCloud2
+from nav_msgs.msg import OccupancyGrid
+from geometry_msgs.msg import PoseWithCovarianceStamped
+from tf2_ros import TransformBroadcaster
+
+class IsaacROSMappingNode(Node):
+    def __init__(self):
+        super().__init__('isaac_ros_mapping_node')
+
+        # Isaac ROS specific components
+        self.isaac_localization = self.initialize_isaac_localization()
+        self.isaac_mapping = self.initialize_isaac_mapping()
+
+        # Publishers and subscribers
+        self.map_pub = self.create_publisher(OccupancyGrid, '/map', 1)
+        self.pose_pub = self.create_publisher(
+            PoseWithCovarianceStamped, '/localized_pose', 1
+        )
+
+        # Isaac ROS sensor subscriptions
+        self.image_sub = self.create_subscription(
+            Image, '/isaac/sim/camera/rgb', self.image_callback, 10
+        )
+        self.scan_sub = self.create_subscription(
+            LaserScan, '/isaac/sim/lidar', self.scan_callback, 10
+        )
+        self.imu_sub = self.create_subscription(
+            Imu, '/isaac/sim/imu', self.imu_callback, 10
+        )
+
+        # Timer for map updates
+        self.map_update_timer = self.create_timer(0.5, self.update_map)
+
+        # TF broadcaster
+        self.tf_broadcaster = TransformBroadcaster(self)
+
+    def image_callback(self, msg):
+        """Handle Isaac Sim camera data"""
+        # Process with Isaac ROS perception pipeline
+        features = self.isaac_localization.process_image(msg)
+        self.current_features = features
+
+    def scan_callback(self, msg):
+        """Handle Isaac Sim LiDAR data"""
+        # Process with Isaac ROS mapping pipeline
+        map_update = self.isaac_mapping.process_scan(msg)
+        self.pending_map_updates.append(map_update)
+
+    def imu_callback(self, msg):
+        """Handle Isaac Sim IMU data"""
+        # Use for motion compensation and pose refinement
+        self.imu_data = msg
+
+    def update_map(self):
+        """Update map using Isaac ROS components"""
+        if self.pending_map_updates:
+            # Integrate all pending updates using Isaac ROS
+            integrated_map = self.isaac_mapping.integrate_updates(
+                self.pending_map_updates
+            )
+
+            # Publish updated map
+            map_msg = self.convert_map_to_ros(integrated_map)
+            self.map_pub.publish(map_msg)
+
+            # Clear pending updates
+            self.pending_map_updates.clear()
+
+    def convert_map_to_ros(self, isaac_map):
+        """Convert Isaac map format to ROS OccupancyGrid"""
+        # Convert from Isaac format to ROS format
+        ros_map = OccupancyGrid()
+        # Implementation details...
+        return ros_map
+```
+
+## Configuration for Humanoid Mapping/Localization
+
+### Example Configuration
+```yaml
+# Humanoid mapping and localization configuration
+humanoid_mapping:
+  ros__parameters:
+    # Mapping parameters
+    mapping:
+      map_resolution: 0.05  # meters per cell
+      map_size: [20.0, 20.0]  # meters
+      update_frequency: 2.0  # Hz
+      enable_loop_closure: true
+      loop_closure_threshold: 0.7
+      max_map_updates_per_second: 5
+
+    # Localization parameters
+    localization:
+      initial_pose_variance: [0.5, 0.5, 0.1]  # x, y, theta
+      min_particle_count: 100
+      max_particle_count: 1000
+      resample_likelihood_thresh: 0.5
+      enable_kinematic_localization: true
+
+    # Humanoid-specific parameters
+    humanoid_specific:
+      # Gait-aware mapping
+      gait_aware_mapping: true
+      gait_frequency: 2.0  # Hz
+      stance_phase_ratio: 0.6  # Fraction of gait cycle in stable stance
+
+      # Social mapping
+      social_mapping_enabled: true
+      personal_space_radius: 0.8  # meters
+      social_zone_buffer: 0.5  # meters
+
+      # Human-scale features
+      eye_level_region: [0.3, 0.7]  # Relative image region for eye-level features
+      human_reference_height: [1.2, 1.8]  # meters
+
+    # Performance parameters
+    performance:
+      max_processing_time_ms: 30.0  # 30 FPS target
+      enable_adaptive_processing: true
+      multiresolution_mapping: true
+      map_resolution_levels: [0.1, 0.05, 0.025]
+
+    # Sensor fusion
+    sensor_fusion:
+      lidar_weight: 0.6
+      visual_weight: 0.3
+      imu_weight: 0.1
+      kinematic_weight: 0.2
+
+    # Isaac ROS integration
+    isaac_ros:
+      enable_gpu_acceleration: true
+      gpu_device_id: 0
+      enable_tensorrt: true
+      tensorrt_precision: "fp16"
+```
+
+## Testing and Validation
+
+### Humanoid-Specific Tests
+```python
+# Example: Testing humanoid mapping/localization
+class HumanoidMappingTester:
+    def __init__(self):
+        self.test_scenarios = [
+            "walking_straight",
+            "turning_while_walking",
+            "navigating_around_humans",
+            "ascending_descending_stairs",
+            "social_navigation_scenarios"
+        ]
+
+    def test_gait_aware_localization(self):
+        """Test localization accuracy during different gait phases"""
+        # Simulate walking with known gait phases
+        walking_simulation = self.create_walking_simulation()
+
+        # Collect localization estimates throughout gait cycle
+        localization_errors = []
+
+        for gait_phase in walking_simulation.gait_phases:
+            # Get localization estimate for this phase
+            pose_estimate = self.get_localization_estimate(gait_phase)
+            ground_truth = walking_simulation.get_ground_truth_pose(gait_phase)
+
+            error = self.calculate_pose_error(pose_estimate, ground_truth)
+            localization_errors.append({
+                'phase': gait_phase,
+                'error': error,
+                'is_stable': walking_simulation.is_stable_phase(gait_phase)
+            })
+
+        # Analyze results
+        stable_errors = [e['error'] for e in localization_errors if e['is_stable']]
+        unstable_errors = [e['error'] for e in localization_errors if not e['is_stable']]
+
+        # Verify stable phases have lower errors than unstable phases
+        avg_stable_error = sum(stable_errors) / len(stable_errors) if stable_errors else float('inf')
+        avg_unstable_error = sum(unstable_errors) / len(unstable_errors) if unstable_errors else 0
+
+        assert avg_stable_error < avg_unstable_error, \
+            f"Stable phase error ({avg_stable_error}) should be less than unstable error ({avg_unstable_error})"
+
+        return localization_errors
+```
+
+## Summary
+
+Mapping and localization for humanoid robots requires specialized approaches that account for bipedal locomotion, human-scale environments, and social navigation requirements. Key considerations include gait-aware processing, human-aware mapping, social navigation constraints, and multi-modal sensor fusion. The integration with Isaac ROS provides GPU acceleration for real-time performance while maintaining the accuracy required for safe and effective humanoid robot navigation in human environments.

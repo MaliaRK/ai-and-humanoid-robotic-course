@@ -1,0 +1,437 @@
+---
+title: "GPU Acceleration for Perception"
+description: "Leveraging GPU computing for real-time perception in humanoid robotics"
+sidebar_position: 3
+---
+
+# GPU Acceleration for Perception
+
+## Introduction
+
+GPU acceleration is essential for real-time perception in humanoid robotics, providing the computational power needed for complex algorithms like Visual SLAM, deep learning inference, and sensor processing. NVIDIA Isaac ROS GEMs leverage GPU acceleration to achieve the performance required for humanoid robots operating in dynamic environments.
+
+## GPU Computing Fundamentals
+
+### CUDA Architecture
+- **Streaming Multiprocessors (SMs)**: Parallel processing units
+- **CUDA Cores**: Individual processing elements within SMs
+- **Tensor Cores**: Specialized units for AI workloads
+- **Memory Hierarchy**: Global, shared, and register memory
+
+### Parallel Processing Concepts
+- **Thread Blocks**: Groups of threads that execute together
+- **Grids**: Collections of thread blocks
+- **Warp Execution**: Groups of 32 threads executing in lockstep
+- **Memory Coalescing**: Efficient memory access patterns
+
+## Isaac ROS GPU Acceleration
+
+### GPU-Accelerated Perception Pipeline
+```
+CPU Processing → GPU Memory Transfer → GPU Computation → GPU Memory Transfer → CPU Post-processing
+```
+
+### Key Accelerated Operations
+- **Feature Detection**: Corner detection, edge detection
+- **Feature Matching**: Descriptor comparison, geometric verification
+- **Stereo Matching**: Dense disparity computation
+- **Image Filtering**: Gaussian, median, bilateral filtering
+- **Deep Learning**: CNN inference, pose estimation
+
+## GPU Memory Management
+
+### Memory Types in CUDA
+- **Global Memory**: High latency, high bandwidth (VRAM)
+- **Shared Memory**: Low latency, fast access (on-chip)
+- **Constant Memory**: Read-only, cached access
+- **Texture Memory**: Cached, spatial locality optimized
+
+### Memory Optimization Strategies
+```python
+# Example: GPU memory optimization for perception
+import numpy as np
+import cupy as cp
+from numba import cuda
+
+class GPUMemoryManager:
+    def __init__(self, max_memory_mb=1024):
+        self.max_memory = max_memory_mb * 1024 * 1024  # Convert to bytes
+        self.memory_pool = {}
+        self.allocated_memory = 0
+
+    def allocate_gpu_buffer(self, shape, dtype, buffer_name=None):
+        """Allocate GPU buffer with memory management"""
+        required_memory = np.prod(shape) * np.dtype(dtype).itemsize
+
+        if self.allocated_memory + required_memory > self.max_memory:
+            # Clear unused buffers or raise error
+            self.cleanup_unused_buffers()
+
+        # Check if we have a reusable buffer
+        buffer_key = (shape, dtype)
+        if buffer_key in self.memory_pool and len(self.memory_pool[buffer_key]) > 0:
+            buffer = self.memory_pool[buffer_key].pop()
+        else:
+            # Allocate new buffer
+            buffer = cp.empty(shape, dtype=dtype)
+            self.allocated_memory += required_memory
+
+        return buffer
+
+    def release_gpu_buffer(self, buffer, shape, dtype):
+        """Return buffer to pool for reuse"""
+        buffer_key = (shape, dtype)
+        if buffer_key not in self.memory_pool:
+            self.memory_pool[buffer_key] = []
+
+        self.memory_pool[buffer_key].append(buffer)
+
+    def cleanup_unused_buffers(self):
+        """Free some GPU memory if needed"""
+        # Implement memory cleanup strategy
+        # This could involve freeing oldest unused buffers
+        pass
+```
+
+## CUDA Kernel Optimization
+
+### Kernel Design Principles
+- **Occupancy**: Maximize active warps per SM
+- **Memory Coalescing**: Ensure consecutive threads access consecutive memory
+- **Divergence**: Minimize branching within warps
+- **Shared Memory**: Use for frequently accessed data
+
+### Example: Optimized Feature Detection Kernel
+```cuda
+// Example: Optimized FAST corner detection kernel
+__global__ void fast_corner_kernel(
+    const unsigned char* image,
+    int* corners,
+    int width,
+    int height,
+    int threshold,
+    int* corner_count
+) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (x < 3 || x >= width - 3 || y < 3 || y >= height - 3) {
+        return;
+    }
+
+    unsigned char center = image[y * width + x];
+
+    // FAST-9 corner detection
+    int count = 0;
+    int circle[16] = {
+        -3, 0, -3, 1, -2, 2, -1, 3,  // Top-left arc
+        0, 3, 1, 3, 2, 2, 3, 1,      // Top-right arc
+        3, 0, 3, -1, 2, -2, 1, -3,   // Bottom-right arc
+        0, -3, -1, -3, -2, -2, -3, -1 // Bottom-left arc
+    };
+
+    // Check for bright/dark pixels around the circle
+    bool is_bright = true, is_dark = true;
+
+    for (int i = 0; i < 16; i += 2) {
+        int nx = x + circle[i];
+        int ny = y + circle[i + 1];
+        unsigned char pixel = image[ny * width + nx];
+
+        if (pixel > center + threshold) {
+            is_dark = false;
+        } else if (pixel < center - threshold) {
+            is_bright = false;
+        }
+
+        if (!is_bright && !is_dark) {
+            break;
+        }
+    }
+
+    // Check for 9 consecutive pixels that are brighter or darker
+    if (is_bright || is_dark) {
+        int num_bright = 0, num_dark = 0;
+        int max_bright = 0, max_dark = 0;
+
+        for (int i = 0; i < 16; i += 2) {
+            int nx = x + circle[i];
+            int ny = y + circle[i + 1];
+            unsigned char pixel = image[ny * width + nx];
+
+            if (pixel > center + threshold) {
+                num_bright++;
+                num_dark = 0;
+                max_bright = max(max_bright, num_bright);
+            } else if (pixel < center - threshold) {
+                num_dark++;
+                num_bright = 0;
+                max_dark = max(max_dark, num_dark);
+            } else {
+                num_bright = 0;
+                num_dark = 0;
+            }
+        }
+
+        // Wrap around check
+        for (int i = 0; i < 16; i += 2) {
+            int nx = x + circle[i];
+            int ny = y + circle[i + 1];
+            unsigned char pixel = image[ny * width + nx];
+
+            if (pixel > center + threshold) {
+                if (num_dark > 0) num_bright = 1;
+                else num_bright++;
+                max_bright = max(max_bright, num_bright);
+            } else if (pixel < center - threshold) {
+                if (num_bright > 0) num_dark = 1;
+                else num_dark++;
+                max_dark = max(max_dark, num_dark);
+            } else {
+                break;
+            }
+        }
+
+        if (max_bright >= 9 || max_dark >= 9) {
+            corners[y * width + x] = 1;
+            atomicAdd(corner_count, 1);
+        }
+    }
+}
+```
+
+## TensorRT Integration
+
+### Model Optimization
+- **Layer Fusion**: Combine operations for efficiency
+- **Precision Calibration**: INT8 quantization for speed
+- **Dynamic Tensor Memory**: Optimize memory allocation
+- **Kernel Auto-Tuning**: Select optimal algorithms
+
+### TensorRT Optimization Process
+```python
+# Example: TensorRT optimization for perception models
+import tensorrt as trt
+import pycuda.driver as cuda
+import pycuda.autoinit
+import numpy as np
+
+def optimize_model_with_tensorrt(onnx_model_path, precision="fp16"):
+    """Optimize ONNX model with TensorRT"""
+    # Create TensorRT builder
+    logger = trt.Logger(trt.Logger.WARNING)
+    builder = trt.Builder(logger)
+
+    # Create network
+    network = builder.create_network(
+        1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
+    )
+
+    # Parse ONNX model
+    parser = trt.OnnxParser(network, logger)
+    with open(onnx_model_path, 'rb') as model_file:
+        parser.parse(model_file.read())
+
+    # Configure builder
+    config = builder.create_builder_config()
+
+    if precision == "fp16":
+        config.set_flag(trt.BuilderFlag.FP16)
+    elif precision == "int8":
+        config.set_flag(trt.BuilderFlag.INT8)
+        # Set up INT8 calibration
+        config.int8_calibrator = create_int8_calibrator()
+
+    # Build engine
+    serialized_engine = builder.build_serialized_network(network, config)
+
+    return serialized_engine
+
+def create_int8_calibrator():
+    """Create INT8 calibration data"""
+    # Implementation for INT8 calibration
+    # This would include calibration dataset and algorithm
+    pass
+```
+
+## Isaac ROS GEMs GPU Optimization
+
+### Visual SLAM GPU Acceleration
+- **Feature Detection**: GPU-accelerated corner detection
+- **Descriptor Computation**: Fast GPU-based descriptor calculation
+- **Feature Matching**: Parallel matching on GPU
+- **Pose Estimation**: GPU-accelerated PnP solver
+
+### Deep Learning GPU Acceleration
+- **Model Inference**: TensorRT-optimized neural networks
+- **Preprocessing**: GPU-accelerated image preprocessing
+- **Postprocessing**: GPU-accelerated result processing
+- **Batch Processing**: Efficient batching for throughput
+
+## Performance Optimization Techniques
+
+### Memory Transfer Optimization
+```python
+# Example: Optimized memory transfers
+import cupy as cp
+import numpy as np
+
+class OptimizedPerceptionPipeline:
+    def __init__(self):
+        # Pre-allocate GPU memory
+        self.gpu_image_buffer = cp.empty((480, 640), dtype=cp.uint8)
+        self.gpu_features_buffer = cp.empty((2000, 2), dtype=cp.float32)
+        self.pinned_memory_pool = []
+
+    def process_image_gpu(self, cpu_image):
+        """Process image with optimized memory transfers"""
+        # Use pinned memory for faster transfer
+        if not self.pinned_memory_pool:
+            pinned_image = cp.cuda.pinned_memory.allocate(
+                cpu_image.nbytes
+            )
+            self.pinned_memory_pool.append(pinned_image)
+        else:
+            pinned_image = self.pinned_memory_pool[0]
+
+        # Copy to pinned memory
+        np.copyto(
+            np.frombuffer(pinned_image.ptr, dtype=cpu_image.dtype, count=cpu_image.size),
+            cpu_image.ravel()
+        )
+
+        # Transfer to GPU asynchronously
+        stream = cp.cuda.Stream(non_blocking=True)
+        with stream:
+            gpu_image = cp.from_dlpack(pinned_image)
+
+            # Process on GPU
+            features = self.extract_features_gpu(gpu_image)
+
+            # Copy results back asynchronously
+            cpu_features = cp.asnumpy(features)
+
+        # Synchronize stream
+        stream.synchronize()
+        return cpu_features
+```
+
+### Pipeline Parallelism
+- **Multi-Stream Processing**: Process multiple frames concurrently
+- **Pipeline Stages**: Overlap different processing stages
+- **Memory Pooling**: Reuse GPU memory allocations
+- **Batch Processing**: Process multiple inputs together
+
+## Humanoid-Specific GPU Optimization
+
+### Real-Time Constraints
+- **Predictable Timing**: Ensure consistent processing time
+- **Priority Scheduling**: High-priority perception tasks
+- **Resource Budgeting**: Limit GPU usage for other tasks
+- **Thermal Management**: Monitor and manage GPU temperature
+
+### Multi-Modal Processing
+- **Sensor Fusion**: Combine data from multiple sensors
+- **Parallel Processing**: Process different sensor types simultaneously
+- **Shared Memory**: Efficient data sharing between modules
+- **Synchronization**: Proper timing between sensor streams
+
+## Performance Monitoring
+
+### GPU Utilization Metrics
+```python
+# Example: GPU performance monitoring
+import pynvml
+import time
+
+class GPUPerformanceMonitor:
+    def __init__(self):
+        pynvml.nvmlInit()
+        self.handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+        self.metrics = {
+            'utilization': [],
+            'memory': [],
+            'temperature': [],
+            'power': []
+        }
+
+    def collect_metrics(self):
+        """Collect GPU performance metrics"""
+        # GPU utilization
+        utilization = pynvml.nvmlDeviceGetUtilizationRates(self.handle)
+        self.metrics['utilization'].append(utilization.gpu)
+
+        # Memory usage
+        memory_info = pynvml.nvmlDeviceGetMemoryInfo(self.handle)
+        memory_util = (memory_info.used / memory_info.total) * 100
+        self.metrics['memory'].append(memory_util)
+
+        # Temperature
+        temperature = pynvml.nvmlDeviceGetTemperature(
+            self.handle, pynvml.NVML_TEMPERATURE_GPU
+        )
+        self.metrics['temperature'].append(temperature)
+
+        # Power consumption
+        power = pynvml.nvmlDeviceGetPowerUsage(self.handle) / 1000.0  # Convert to watts
+        self.metrics['power'].append(power)
+
+    def get_performance_summary(self):
+        """Get summary of performance metrics"""
+        if not self.metrics['utilization']:
+            return "No metrics collected"
+
+        avg_util = sum(self.metrics['utilization']) / len(self.metrics['utilization'])
+        avg_memory = sum(self.metrics['memory']) / len(self.metrics['memory'])
+        max_temp = max(self.metrics['temperature']) if self.metrics['temperature'] else 0
+        avg_power = sum(self.metrics['power']) / len(self.metrics['power']) if self.metrics['power'] else 0
+
+        return {
+            'avg_gpu_utilization': f"{avg_util:.2f}%",
+            'avg_memory_utilization': f"{avg_memory:.2f}%",
+            'max_temperature': f"{max_temp}°C",
+            'avg_power': f"{avg_power:.2f}W"
+        }
+```
+
+## Troubleshooting GPU Issues
+
+### Common GPU Problems
+- **Memory Exhaustion**: Monitor and optimize memory usage
+- **Driver Issues**: Ensure CUDA and driver compatibility
+- **Thermal Throttling**: Improve cooling or reduce workload
+- **Performance Bottlenecks**: Profile and optimize critical paths
+
+### Optimization Strategies
+- **Kernel Profiling**: Use Nsight Compute to analyze kernels
+- **Memory Profiling**: Use Nsight Systems to analyze memory
+- **Algorithm Selection**: Choose GPU-friendly algorithms
+- **Precision Trade-offs**: Balance accuracy with performance
+
+## Configuration and Tuning
+
+### Isaac ROS GPU Configuration
+```yaml
+# Isaac ROS GPU configuration for perception
+isaac_ros_perception:
+  ros__parameters:
+    # GPU settings
+    gpu_device_id: 0
+    enable_gpu_acceleration: true
+    gpu_memory_fraction: 0.8
+    enable_tensorrt: true
+
+    # Performance settings
+    max_concurrent_frames: 2
+    enable_async_processing: true
+    pipeline_depth: 3
+
+    # Optimization settings
+    enable_memory_pooling: true
+    enable_batch_processing: true
+    max_batch_size: 4
+```
+
+## Summary
+
+GPU acceleration is fundamental to achieving real-time performance in humanoid robot perception systems. Through careful memory management, kernel optimization, and TensorRT integration, Isaac ROS GEMs provide the computational power needed for complex perception tasks. Proper configuration and monitoring ensure optimal performance while meeting the real-time requirements of humanoid robotics applications.

@@ -1,0 +1,977 @@
+---
+title: "Global and Local Planners for Humanoid Robots"
+description: "Advanced path planning algorithms optimized for humanoid robot locomotion and navigation"
+sidebar_position: 3
+---
+
+# Global and Local Planners for Humanoid Robots
+
+## Introduction
+
+Path planning for humanoid robots requires specialized algorithms that account for the unique challenges of bipedal locomotion, balance constraints, and human-scale environments. Unlike wheeled robots, humanoid robots must consider gait patterns, balance maintenance, and the complex kinematics of walking, which significantly affect both global and local planning processes.
+
+## Humanoid-Specific Planning Challenges
+
+### Bipedal Locomotion Constraints
+- **Gait Patterns**: Must follow stable walking patterns (single support, double support phases)
+- **Balance Maintenance**: Path must allow for stable balance throughout execution
+- **Step Constraints**: Discrete step planning with size and placement limitations
+- **Dynamic Stability**: Center of Mass (CoM) must remain within stable regions
+
+### Humanoid-Specific Constraints
+- **Foot Placement**: Precise foot placement required for stability
+- **Step Height**: Limited step height capabilities
+- **Turning Radius**: Different turning mechanics compared to wheeled robots
+- **Terrain Negotiation**: Stairs, slopes, and uneven terrain challenges
+
+## Global Planner Architecture
+
+### Humanoid-Compatible Global Planners
+
+#### 1. Gait-Aware Path Planner
+```python
+# Example: Gait-aware global planner
+import numpy as np
+from nav2_core.planner import GlobalPlanner
+from geometry_msgs.msg import PoseStamped, Point
+from nav_msgs.msg import Path
+from builtin_interfaces.msg import Duration
+import heapq
+
+class GaitAwareGlobalPlanner(GlobalPlanner):
+    def __init__(self):
+        self.planner_id = "GaitAwarePlanner"
+        self.min_step_length = 0.15  # Minimum step length (meters)
+        self.max_step_length = 0.6   # Maximum step length (meters)
+        self.max_step_height = 0.15  # Maximum step height (meters)
+        self.support_polygon = self.calculate_support_polygon()  # For balance
+
+    def createPlan(self, start: PoseStamped, goal: PoseStamped, planner_id: str = ""):
+        """Create a gait-aware path plan for humanoid navigation"""
+        # Convert start and goal to grid coordinates
+        start_cell = self.pose_to_grid(start.pose)
+        goal_cell = self.pose_to_grid(goal.pose)
+
+        # Plan path considering gait constraints
+        path_cells = self.a_star_with_gait_constraints(start_cell, goal_cell)
+
+        # Convert grid path to world coordinates
+        world_path = self.grid_path_to_world(path_cells)
+
+        # Smooth path for humanoid gait
+        humanoid_path = self.smooth_path_for_gait(world_path)
+
+        # Convert to ROS Path message
+        ros_path = self.path_to_ros_path(humanoid_path, start.header)
+
+        return ros_path
+
+    def a_star_with_gait_constraints(self, start, goal):
+        """A* algorithm with humanoid gait constraints"""
+        open_set = [(0, start)]
+        came_from = {}
+        g_score = {start: 0}
+        f_score = {start: self.heuristic(start, goal)}
+
+        visited = set()
+
+        while open_set:
+            current = heapq.heappop(open_set)[1]
+
+            if current == goal:
+                # Reconstruct path
+                path = []
+                while current in came_from:
+                    path.append(current)
+                    current = came_from[current]
+                path.append(start)
+                return path[::-1]
+
+            visited.add(current)
+
+            # Get valid neighbors considering gait constraints
+            neighbors = self.get_gait_valid_neighbors(current)
+
+            for neighbor in neighbors:
+                if neighbor in visited:
+                    continue
+
+                # Calculate tentative g_score
+                tentative_g_score = g_score[current] + self.distance(current, neighbor)
+
+                # Check if this path is better
+                if neighbor not in g_score or tentative_g_score < g_score[neighbor]:
+                    came_from[neighbor] = current
+                    g_score[neighbor] = tentative_g_score
+                    f_score[neighbor] = g_score[neighbor] + self.heuristic(neighbor, goal)
+
+                    # Check if neighbor satisfies gait constraints
+                    if self.is_gait_feasible(current, neighbor):
+                        heapq.heappush(open_set, (f_score[neighbor], neighbor))
+
+        return []  # No path found
+
+    def get_gait_valid_neighbors(self, cell):
+        """Get neighbors that are valid for humanoid gait"""
+        neighbors = []
+        directions = [
+            (1, 0), (-1, 0), (0, 1), (0, -1),  # 4-connected
+            (1, 1), (1, -1), (-1, 1), (-1, -1)  # 8-connected
+        ]
+
+        for dx, dy in directions:
+            neighbor = (cell[0] + dx, cell[1] + dy)
+
+            # Check if neighbor is in bounds and not occupied
+            if self.is_valid_cell(neighbor) and not self.is_occupied(neighbor):
+                # Check gait feasibility for this step
+                if self.is_gait_feasible(cell, neighbor):
+                    neighbors.append(neighbor)
+
+        return neighbors
+
+    def is_gait_feasible(self, current, next_cell):
+        """Check if step from current to next is gait-feasible"""
+        # Convert cells to world coordinates
+        current_world = self.grid_to_world(current)
+        next_world = self.grid_to_world(next)
+
+        # Calculate step distance
+        step_distance = self.distance(current_world, next_world)
+
+        # Check step length constraints
+        if step_distance < self.min_step_length or step_distance > self.max_step_length:
+            return False
+
+        # Check step height (from costmap elevation data)
+        step_height = abs(next_world[2] - current_world[2])  # Assuming 3D grid
+        if step_height > self.max_step_height:
+            return False
+
+        # Check for obstacles at foot level
+        if not self.has_safe_foot_placement(current_world, next_world):
+            return False
+
+        # Check for balance constraints
+        if not self.maintains_balance(current, next_cell):
+            return False
+
+        return True
+
+    def has_safe_foot_placement(self, current_pos, next_pos):
+        """Check if foot placement is safe between positions"""
+        # Check for obstacles at foot level (0.05m height)
+        # Check for drop-offs that would cause unstable steps
+        # Check for slippery or unstable surfaces
+        return True  # Simplified for example
+
+    def maintains_balance(self, current, next_cell):
+        """Check if step maintains humanoid balance"""
+        # Calculate CoM trajectory for this step
+        # Ensure CoM stays within support polygon
+        # Check for dynamic stability constraints
+        return True  # Simplified for example
+
+    def smooth_path_for_gait(self, path):
+        """Smooth path to be compatible with humanoid gait patterns"""
+        if len(path) < 3:
+            return path
+
+        smoothed_path = [path[0]]  # Start point
+
+        i = 0
+        while i < len(path) - 1:
+            # Look ahead to find the furthest point that can be reached
+            # with a valid humanoid step
+            j = i + 1
+            while j < len(path) and self.is_direct_gait_feasible(path[i], path[j]):
+                j += 1
+
+            # Add the last valid point
+            if j > i + 1:
+                smoothed_path.append(path[j - 1])
+                i = j - 1
+            else:
+                # If no further point is reachable, add the next point
+                smoothed_path.append(path[i + 1])
+                i += 1
+
+        return smoothed_path
+
+    def is_direct_gait_feasible(self, start, end):
+        """Check if path from start to end is directly gait-feasible"""
+        # Check if the straight line path between start and end
+        # satisfies gait constraints at intermediate points
+        distance = self.distance(start, end)
+
+        if distance > self.max_step_length:
+            return False
+
+        # Sample intermediate points and check constraints
+        steps = int(distance / (self.max_step_length / 2))
+        for step in range(1, steps):
+            ratio = step / steps
+            intermediate = (
+                start[0] + ratio * (end[0] - start[0]),
+                start[1] + ratio * (end[1] - start[1])
+            )
+
+            # Check if intermediate point is valid
+            if self.is_occupied(self.pose_to_grid(intermediate)):
+                return False
+
+        return True
+```
+
+#### 2. Balance-Aware Planner
+```python
+# Example: Balance-aware path planner
+class BalanceAwarePlanner(GlobalPlanner):
+    def __init__(self):
+        self.balance_threshold = 0.8  # Stability threshold
+        self.max_lean_angle = 15.0  # Maximum lean angle (degrees)
+        self.support_polygon_radius = 0.2  # Support polygon radius (meters)
+
+    def createPlan(self, start: PoseStamped, goal: PoseStamped, planner_id: str = ""):
+        """Create path with balance constraints"""
+        # Plan initial path without balance constraints
+        initial_path = self.plan_initial_path(start, goal)
+
+        # Adapt path for balance requirements
+        balanced_path = self.adapt_path_for_balance(initial_path)
+
+        # Verify path balance feasibility
+        if not self.is_path_balanced(balanced_path):
+            # Fallback to safer path
+            safe_path = self.find_safe_path_alternative(start, goal)
+            return self.path_to_ros_path(safe_path, start.header)
+
+        return self.path_to_ros_path(balanced_path, start.header)
+
+    def adapt_path_for_balance(self, path):
+        """Adapt path to maintain balance throughout"""
+        adapted_path = []
+
+        for i, pose in enumerate(path):
+            if i == 0:
+                adapted_path.append(pose)
+            else:
+                prev_pose = adapted_path[-1]
+
+                # Check if direct step is balance-safe
+                if self.is_step_balanced(prev_pose, pose):
+                    adapted_path.append(pose)
+                else:
+                    # Find intermediate points that maintain balance
+                    intermediate_points = self.find_balance_preserving_intermediates(
+                        prev_pose, pose
+                    )
+                    adapted_path.extend(intermediate_points)
+
+        return adapted_path
+
+    def is_step_balanced(self, current_pose, next_pose):
+        """Check if step from current to next maintains balance"""
+        # Calculate CoM trajectory
+        com_trajectory = self.calculate_com_trajectory(current_pose, next_pose)
+
+        # Check if CoM stays within stability limits
+        for point in com_trajectory:
+            if not self.is_stable_position(point):
+                return False
+
+        return True
+
+    def calculate_com_trajectory(self, start_pose, end_pose):
+        """Calculate CoM trajectory for a step"""
+        # Simplified CoM trajectory calculation
+        # In practice, this would use humanoid kinematics and dynamics
+        trajectory = []
+
+        # Sample trajectory points
+        steps = 10
+        for i in range(steps + 1):
+            ratio = i / steps
+            x = start_pose.position.x + ratio * (end_pose.position.x - start_pose.position.x)
+            y = start_pose.position.y + ratio * (end_pose.position.y - start_pose.position.y)
+            z = start_pose.position.z + ratio * (end_pose.position.z - start_pose.position.z)
+
+            trajectory.append(Point(x=x, y=y, z=z))
+
+        return trajectory
+
+    def is_stable_position(self, com_position):
+        """Check if CoM position is stable"""
+        # Check if CoM is within support polygon
+        # This would integrate with actual humanoid balance models
+        return True  # Simplified for example
+```
+
+## Local Planner Architecture
+
+### Humanoid-Specific Local Planners
+
+#### 1. Gait-Constrained Local Planner
+```python
+# Example: Gait-constrained local planner
+from nav2_core.controller import Controller
+from geometry_msgs.msg import Twist, PoseStamped
+from nav_msgs.msg import Path
+
+class GaitConstrainedLocalPlanner(Controller):
+    def __init__(self):
+        self.controller_frequency = 20.0  # Hz
+        self.linear_vel_max = 0.3  # m/s (slower for stability)
+        self.angular_vel_max = 0.5  # rad/s
+        self.min_step_length = 0.15  # Minimum step length
+        self.max_step_length = 0.6   # Maximum step length
+        self.gait_frequency = 2.0    # Hz
+
+    def setPlan(self, path: Path):
+        """Set the path for the controller"""
+        self.path = self.adapt_path_for_local_planning(path)
+        self.current_waypoint_index = 0
+        self.gait_phase = 0.0
+        self.next_gait_time = self.get_clock().now()
+
+    def computeVelocityCommands(self, pose: PoseStamped, velocity: Twist, goal_checker):
+        """Compute velocity commands with gait constraints"""
+        # Update gait phase
+        self.update_gait_phase()
+
+        # Check current balance state
+        balance_state = self.get_current_balance_state()
+
+        if not self.is_balanced(balance_state):
+            # Emergency: recover balance immediately
+            return self.balance_recovery_commands()
+
+        # Get next waypoint to track
+        next_waypoint = self.get_next_waypoint(pose)
+
+        if next_waypoint is None:
+            # Goal reached
+            return Twist()  # Zero velocity
+
+        # Compute commands with gait constraints
+        cmd_vel = self.compute_gait_constrained_commands(
+            pose, next_waypoint, velocity, balance_state
+        )
+
+        # Apply safety limits
+        cmd_vel = self.apply_gait_constraints(cmd_vel, balance_state)
+
+        return cmd_vel
+
+    def compute_gait_constrained_commands(self, current_pose, target_waypoint, velocity, balance_state):
+        """Compute velocity commands considering gait constraints"""
+        # Calculate desired heading to target
+        dx = target_waypoint.pose.position.x - current_pose.pose.position.x
+        dy = target_waypoint.pose.position.y - current_pose.pose.position.y
+
+        desired_angle = np.arctan2(dy, dx)
+        current_angle = self.get_yaw_from_pose(current_pose.pose.orientation)
+
+        # Calculate angular error
+        angle_error = self.normalize_angle(desired_angle - current_angle)
+
+        # Calculate distance to target
+        distance = np.sqrt(dx*dx + dy*dy)
+
+        # Compute commands
+        cmd_vel = Twist()
+
+        # Linear velocity: proportional to distance, limited by gait constraints
+        cmd_vel.linear.x = min(
+            self.linear_vel_max * 0.8,  # Conservative for stability
+            max(0.05, distance * 1.0)   # Minimum speed to keep moving
+        )
+
+        # Angular velocity: proportional to angle error
+        cmd_vel.angular.z = angle_error * 1.0
+
+        # Apply gait-specific constraints
+        cmd_vel = self.apply_gait_specific_constraints(cmd_vel, distance, angle_error)
+
+        return cmd_vel
+
+    def apply_gait_specific_constraints(self, cmd_vel, distance, angle_error):
+        """Apply gait-specific constraints to velocity commands"""
+        # Adjust commands based on gait phase
+        gait_factor = self.get_gait_phase_factor()
+        cmd_vel.linear.x *= gait_factor
+        cmd_vel.angular.z *= gait_factor
+
+        # Adjust for turning (may need different step patterns)
+        if abs(angle_error) > 0.2:  # Significant turning required
+            cmd_vel.linear.x *= 0.7  # Reduce speed during turns
+
+        # Ensure commands are compatible with step constraints
+        max_linear_for_step = self.max_step_length * self.gait_frequency
+        cmd_vel.linear.x = min(cmd_vel.linear.x, max_linear_for_step)
+
+        return cmd_vel
+
+    def get_gait_phase_factor(self):
+        """Get factor based on current gait phase"""
+        # During single support phase, be more conservative
+        # During double support phase, allow more aggressive motion
+        phase = self.gait_phase
+        if 0.0 <= phase < 0.5:  # Double support phase (more stable)
+            return 1.0
+        else:  # Single support phase (less stable)
+            return 0.7
+
+    def update_gait_phase(self):
+        """Update gait phase based on time"""
+        current_time = self.get_clock().now().nanoseconds / 1e9
+        gait_period = 1.0 / self.gait_frequency
+        self.gait_phase = (current_time % gait_period) / gait_period
+
+    def apply_gait_constraints(self, cmd_vel, balance_state):
+        """Apply final gait and balance constraints"""
+        # Ensure commands don't exceed safe limits
+        cmd_vel.linear.x = max(-self.linear_vel_max, min(self.linear_vel_max, cmd_vel.linear.x))
+        cmd_vel.angular.z = max(-self.angular_vel_max, min(self.angular_vel_max, cmd_vel.angular.z))
+
+        # Additional balance-based adjustments
+        stability_factor = balance_state.get_stability_factor()
+        cmd_vel.linear.x *= stability_factor
+        cmd_vel.angular.z *= stability_factor
+
+        return cmd_vel
+
+    def balance_recovery_commands(self):
+        """Generate commands for balance recovery"""
+        cmd_vel = Twist()
+        cmd_vel.linear.x = 0.0  # Stop forward motion
+        cmd_vel.angular.z = 0.0  # Stop turning
+        # Additional recovery actions would be implemented here
+        return cmd_vel
+```
+
+#### 2. Footstep Planner
+```python
+# Example: Footstep planner for humanoid navigation
+import numpy as np
+from geometry_msgs.msg import Point, Pose
+from visualization_msgs.msg import MarkerArray, Marker
+
+class FootstepPlanner:
+    def __init__(self):
+        self.step_width = 0.2  # Distance between feet (meters)
+        self.step_length = 0.3  # Forward step length (meters)
+        self.max_step_height = 0.1  # Maximum step-up height (meters)
+        self.support_polygon = self.calculate_support_polygon()
+
+    def plan_footsteps(self, path, start_pose):
+        """Plan footstep sequence for following the path"""
+        footsteps = []
+        left_foot_pose = self.calculate_left_foot_pose(start_pose)
+        right_foot_pose = self.calculate_right_foot_pose(start_pose)
+
+        for i, path_pose in enumerate(path):
+            if i == 0:
+                # Add initial foot poses
+                footsteps.append(('left', left_foot_pose))
+                footsteps.append(('right', right_foot_pose))
+                continue
+
+            # Determine which foot to move next based on gait pattern
+            next_foot = self.determine_next_foot(left_foot_pose, right_foot_pose, path_pose)
+
+            # Plan step for the selected foot
+            if next_foot == 'left':
+                new_left_pose = self.plan_next_left_step(
+                    left_foot_pose, right_foot_pose, path_pose
+                )
+                footsteps.append(('left', new_left_pose))
+                left_foot_pose = new_left_pose
+            else:  # right foot
+                new_right_pose = self.plan_next_right_step(
+                    right_foot_pose, left_foot_pose, path_pose
+                )
+                footsteps.append(('right', new_right_pose))
+                right_foot_pose = new_right_pose
+
+        return footsteps
+
+    def plan_next_left_step(self, current_left, current_right, target_pose):
+        """Plan next left foot position"""
+        # Calculate desired position based on target
+        target_x = target_pose.position.x
+        target_y = target_pose.position.y
+
+        # Consider current right foot position for stability
+        # Ensure step maintains balance (within support polygon)
+        new_pose = Pose()
+        new_pose.position.x = target_x
+        new_pose.position.y = target_y - self.step_width / 2  # Offset for left foot
+        new_pose.position.z = target_pose.position.z  # Same height
+
+        # Calculate appropriate orientation
+        # This would involve more complex calculations in practice
+        new_pose.orientation = target_pose.orientation
+
+        # Verify step feasibility
+        if not self.is_step_feasible(current_right, new_pose):
+            # Adjust position to make step feasible
+            new_pose = self.adjust_step_for_feasibility(current_right, new_pose)
+
+        return new_pose
+
+    def plan_next_right_step(self, current_right, current_left, target_pose):
+        """Plan next right foot position"""
+        # Similar to left foot planning
+        new_pose = Pose()
+        new_pose.position.x = target_pose.position.x
+        new_pose.position.y = target_pose.position.y + self.step_width / 2  # Offset for right foot
+        new_pose.position.z = target_pose.position.z
+
+        new_pose.orientation = target_pose.orientation
+
+        if not self.is_step_feasible(current_left, new_pose):
+            new_pose = self.adjust_step_for_feasibility(current_left, new_pose)
+
+        return new_pose
+
+    def is_step_feasible(self, support_foot, swing_foot):
+        """Check if step is feasible"""
+        # Check distance constraints
+        distance = self.calculate_distance(support_foot.position, swing_foot.position)
+        if distance > self.max_step_length * 1.5:  # Allow some flexibility
+            return False
+
+        # Check height constraints
+        height_diff = abs(swing_foot.position.z - support_foot.position.z)
+        if height_diff > self.max_step_height:
+            return False
+
+        # Check for obstacles at foot level
+        if self.has_obstacle_at_foot_level(swing_foot):
+            return False
+
+        # Check if resulting pose maintains balance
+        if not self.maintains_balance_after_step(support_foot, swing_foot):
+            return False
+
+        return True
+
+    def calculate_support_polygon(self):
+        """Calculate support polygon for balance"""
+        # For bipedal robot, support polygon is typically between feet
+        # This would be more complex in practice
+        return {
+            'width': self.step_width,
+            'length': self.step_length,
+            'margin': 0.1  # Safety margin
+        }
+
+    def maintains_balance_after_step(self, support_foot, swing_foot):
+        """Check if robot remains balanced after this step"""
+        # Calculate center of pressure
+        cop_x = (support_foot.position.x + swing_foot.position.x) / 2
+        cop_y = (support_foot.position.y + swing_foot.position.y) / 2
+
+        # Check if CoP is within support polygon
+        support_center_x = cop_x
+        support_center_y = cop_y
+
+        # Define support polygon boundaries
+        half_width = self.support_polygon['width'] / 2
+        half_length = self.support_polygon['length'] / 2
+
+        # Check if CoP is within bounds
+        within_bounds = (
+            abs(cop_x - support_center_x) <= half_length and
+            abs(cop_y - support_center_y) <= half_width
+        )
+
+        return within_bounds
+```
+
+## Isaac ROS Integration
+
+### Isaac ROS Planner Components
+```python
+# Example: Isaac ROS integration with GPU acceleration
+import rclpy
+from rclpy.node import Node
+from nav_msgs.msg import Path
+from geometry_msgs.msg import PoseStamped
+from sensor_msgs.msg import PointCloud2
+import cupy as cp  # GPU acceleration
+
+class IsaacROSPlannerNode(Node):
+    def __init__(self):
+        super().__init__('isaac_ros_planner_node')
+
+        # Isaac ROS GPU-accelerated planning components
+        self.gpu_planner = self.initialize_gpu_planner()
+        self.obstacle_processor = self.initialize_gpu_obstacle_processor()
+
+        # Publishers and subscribers
+        self.path_pub = self.create_publisher(Path, '/plan', 10)
+        self.global_plan_pub = self.create_publisher(Path, '/global_plan', 10)
+        self.local_plan_pub = self.create_publisher(Path, '/local_plan', 10)
+
+        # Subscriptions for sensor data
+        self.obstacle_sub = self.create_subscription(
+            PointCloud2, '/isaac/sim/obstacles', self.obstacle_callback, 10
+        )
+        self.map_sub = self.create_subscription(
+            OccupancyGrid, '/map', self.map_callback, 10
+        )
+
+        # Service servers for planning
+        self.plan_srv = self.create_service(
+            GetPlan, 'plan_path', self.plan_path_callback
+        )
+
+        # Initialize planning parameters
+        self.planning_enabled = True
+        self.gpu_device_id = 0
+
+    def initialize_gpu_planner(self):
+        """Initialize GPU-accelerated planning components"""
+        # Check if GPU is available
+        if cp.cuda.is_available():
+            self.get_logger().info("Initializing GPU-accelerated planner")
+            # Initialize CUDA-based planning algorithms
+            return GPUAcceleratedPlanner()
+        else:
+            self.get_logger().warn("GPU not available, using CPU planner")
+            return CPUPlanner()
+
+    def initialize_gpu_obstacle_processor(self):
+        """Initialize GPU-accelerated obstacle processing"""
+        if cp.cuda.is_available():
+            return GPUObstacleProcessor()
+        else:
+            return CPUObstacleProcessor()
+
+    def obstacle_callback(self, msg):
+        """Process obstacles using GPU acceleration"""
+        # Convert ROS message to format suitable for GPU processing
+        obstacle_data = self.ros_to_gpu_format(msg)
+
+        # Process obstacles on GPU
+        processed_obstacles = self.obstacle_processor.process_gpu(obstacle_data)
+
+        # Update local planning with obstacle information
+        self.update_local_planning_with_obstacles(processed_obstacles)
+
+    def plan_path_callback(self, request, response):
+        """Handle path planning request with GPU acceleration"""
+        if not self.planning_enabled:
+            response.error_code = 1  # Planning disabled
+            return response
+
+        try:
+            # Plan path using GPU-accelerated algorithms
+            planned_path = self.gpu_planner.plan_path(
+                start=request.start,
+                goal=request.goal,
+                obstacles=self.current_obstacles,
+                map=self.current_map
+            )
+
+            # Convert to response format
+            response.plan.poses = planned_path.poses
+            response.plan.header = request.start.header
+            response.error_code = 0  # Success
+
+        except Exception as e:
+            self.get_logger().error(f"Planning failed: {e}")
+            response.error_code = 2  # Planning failed
+
+        return response
+
+    def ros_to_gpu_format(self, ros_msg):
+        """Convert ROS message to GPU-compatible format"""
+        # This would convert ROS PointCloud2 or OccupancyGrid
+        # to CuPy arrays or other GPU-compatible format
+        pass
+```
+
+## Performance Optimization
+
+### Real-Time Planning Considerations
+```python
+# Example: Real-time planning optimization
+class RealTimePlanner:
+    def __init__(self):
+        self.max_planning_time = 50.0  # ms maximum planning time
+        self.target_planning_frequency = 10.0  # Hz
+        self.enable_adaptive_planning = True
+        self.planning_budget = 50.0  # ms per planning cycle
+
+    def adaptive_plan_with_time_budget(self, start, goal, time_budget_ms):
+        """Plan adaptively within time budget"""
+        start_time = self.get_current_time()
+
+        # Choose planning algorithm based on time available
+        if time_budget_ms < self.max_planning_time * 0.3:
+            # Quick planning with simple algorithm
+            path = self.quick_plan(start, goal)
+        elif time_budget_ms < self.max_planning_time * 0.7:
+            # Moderate planning with balanced algorithm
+            path = self.moderate_plan(start, goal)
+        else:
+            # Full planning with optimal algorithm
+            path = self.full_plan(start, goal)
+
+        # Verify time constraints
+        elapsed_time = self.get_current_time() - start_time
+        if elapsed_time > time_budget_ms:
+            self.get_logger().warn(f"Planning exceeded time budget: {elapsed_time}ms > {time_budget_ms}ms")
+
+        return path
+
+    def quick_plan(self, start, goal):
+        """Fast but potentially suboptimal planning"""
+        # Use simple algorithm like grid-based pathfinding
+        # with coarse resolution
+        return self.simple_grid_plan(start, goal)
+
+    def moderate_plan(self, start, goal):
+        """Balanced approach between speed and quality"""
+        # Use more sophisticated algorithm with moderate resolution
+        return self.hybrid_plan(start, goal)
+
+    def full_plan(self, start, goal):
+        """Comprehensive planning with optimal results"""
+        # Use full optimization with fine resolution
+        return self.optimized_plan(start, goal)
+
+    def interruptible_planning(self, start, goal, interrupt_flag):
+        """Planning that can be interrupted for real-time requirements"""
+        # Implement planning with periodic checks for interruption
+        path = []
+        current = start
+
+        while not self.at_goal(current, goal) and not interrupt_flag.is_set():
+            # Plan next segment
+            next_segment = self.plan_next_segment(current, goal)
+
+            if next_segment:
+                path.extend(next_segment)
+                current = next_segment[-1]
+            else:
+                # No valid path found
+                break
+
+            # Check for interruption
+            if interrupt_flag.is_set():
+                break
+
+        return path
+```
+
+## Configuration and Parameters
+
+### Planner Configuration
+```yaml
+# Global planner configuration
+global_planner:
+  ros__parameters:
+    plugin: "nav2_navfn_planner/NavfnPlanner"
+    tolerance: 0.5
+    use_astar: false
+    allow_unknown: true
+    human_aware_planning: true
+    gait_aware_planning: true
+    balance_constraint_weight: 0.8
+    step_constraint_weight: 0.6
+    max_planning_time: 5.0  # seconds
+
+# Local planner configuration
+local_planner:
+  ros__parameters:
+    plugin: "nav2_regulated_pure_pursuit_controller/RegulatedPurePursuitController"
+    desired_linear_vel: 0.3  # m/s (slower for stability)
+    max_linear_accel: 0.25
+    max_linear_decel: 0.5
+    min_speed_xy: 0.05
+    speed_scaling_strategy: "follow_path"
+    lookahead_dist: 0.6
+    lookahead_time: 1.5
+    transform_tolerance: 0.1
+    use_interpolation: true
+    regulated_linear_scaling_min_speed: 0.1
+    use_rotate_to_heading: true
+    rotate_to_heading_angular_vel: 1.0
+    max_angular_accel: 3.2
+    gait_frequency: 2.0  # Hz for humanoid walking
+    step_length_constraint: 0.6  # meters max step
+    balance_threshold: 0.7  # balance constraint factor
+
+# Humanoid-specific parameters
+humanoid_planners:
+  ros__parameters:
+    # Gait-aware planning
+    gait_aware_global_planning: true
+    gait_frequency: 2.0
+    step_timing_consistency: true
+
+    # Balance-aware planning
+    balance_constraint_planning: true
+    stability_threshold: 0.8
+    support_polygon_constraint: true
+
+    # Human-scale navigation
+    eye_level_planning: true
+    social_navigation_awareness: true
+    personal_space_awareness: true
+
+    # Performance parameters
+    max_global_planning_time: 5.0
+    max_local_planning_time: 0.1
+    enable_adaptive_planning: true
+    target_planning_frequency: 10.0
+```
+
+## Testing and Validation
+
+### Humanoid-Specific Planning Tests
+```python
+# Example: Testing humanoid planning algorithms
+class HumanoidPlannerTester:
+    def __init__(self):
+        self.test_scenarios = [
+            "straight_line_navigation",
+            "turning_with_gait_constraints",
+            "negotiating_small_obstacles",
+            "balancing_aware_planning",
+            "social_navigation_scenarios"
+        ]
+
+    def test_gait_constrained_planning(self):
+        """Test planning with gait constraints"""
+        # Create test environment with step constraints
+        test_map = self.create_step_constraint_test_map()
+
+        # Plan path with gait constraints
+        start = PoseStamped()
+        start.pose.position.x = 0.0
+        start.pose.position.y = 0.0
+
+        goal = PoseStamped()
+        goal.pose.position.x = 5.0
+        goal.pose.position.y = 0.0
+
+        # Plan with gait-aware planner
+        gait_planner = GaitAwareGlobalPlanner()
+        gait_path = gait_planner.createPlan(start, goal)
+
+        # Plan with standard planner for comparison
+        standard_planner = StandardPlanner()
+        standard_path = standard_planner.createPlan(start, goal)
+
+        # Verify gait path is longer but more feasible
+        gait_length = self.calculate_path_length(gait_path)
+        standard_length = self.calculate_path_length(standard_path)
+
+        # The gait-aware path might be longer but should have better step feasibility
+        print(f"Gait path length: {gait_length}, Standard path length: {standard_length}")
+
+        return gait_path, standard_path
+
+    def test_balance_constrained_planning(self):
+        """Test planning with balance constraints"""
+        # Create test environment with balance challenges
+        test_map = self.create_balance_challenge_map()
+
+        # Plan with balance-aware planner
+        balance_planner = BalanceAwarePlanner()
+        balance_path = balance_planner.createPlan(start, goal)
+
+        # Verify path maintains balance throughout
+        balance_feasible = self.verify_balance_feasibility(balance_path)
+
+        assert balance_feasible, "Planned path should maintain balance"
+
+        return balance_path
+
+    def verify_balance_feasibility(self, path):
+        """Verify that path maintains balance feasibility"""
+        # Check each segment of the path for balance feasibility
+        for i in range(len(path.poses) - 1):
+            segment_start = path.poses[i]
+            segment_end = path.poses[i + 1]
+
+            # Verify that transition maintains balance
+            if not self.is_transition_balanced(segment_start, segment_end):
+                return False
+
+        return True
+
+    def is_transition_balanced(self, start_pose, end_pose):
+        """Check if pose transition maintains balance"""
+        # Calculate CoM trajectory between poses
+        # Check if CoM stays within stable regions
+        return True  # Simplified for example
+```
+
+## Integration with Navigation Stack
+
+### Nav2 Integration
+```python
+# Example: Integration with Nav2 navigation stack
+from nav2_behavior_tree.tree_node import TreeNode
+from nav2_msgs.action import ComputePathToPose
+from geometry_msgs.msg import PoseStamped
+import py_trees
+
+class ComputeGaitAwarePathToPose(TreeNode):
+    def __init__(self, name, goal_service, planner_id='GaitAwarePlanner'):
+        super().__init__(name)
+        self._goal_service = goal_service
+        self._planner_id = planner_id
+        self._path = None
+
+    def tick(self):
+        """Compute path with humanoid-specific constraints"""
+        if self._path is not None:
+            return py_trees.common.Status.SUCCESS
+
+        # Get goal from blackboard
+        goal = self.attach_blackboard_client(name=f"{self.name}_blackboard")
+        goal.register_key(key="goal", access=py_trees.common.Access.READ)
+
+        # Create path request with humanoid constraints
+        path_request = ComputePathToPose.Request()
+        path_request.start = self.get_robot_position()
+        path_request.goal = goal.goal
+        path_request.planner_id = self._planner_id
+        path_request.use_start = True
+
+        # Add humanoid-specific parameters
+        path_request.options = {
+            'gait_frequency': 2.0,
+            'balance_threshold': 0.8,
+            'step_length_max': 0.6
+        }
+
+        try:
+            # Call path planning service
+            future = self._goal_service(path_request)
+            if future.done():
+                result = future.result()
+                if result.error_code == 0:
+                    self._path = result.path
+                    return py_trees.common.Status.SUCCESS
+                else:
+                    self._feedback_message = f"Path planning failed: {result.error_code}"
+                    return py_trees.common.Status.FAILURE
+            else:
+                return py_trees.common.Status.RUNNING
+
+        except Exception as e:
+            self._feedback_message = f"Path planning service call failed: {e}"
+            return py_trees.common.Status.FAILURE
+```
+
+## Summary
+
+Global and local planners for humanoid robots require specialized algorithms that account for the unique challenges of bipedal locomotion, balance constraints, and gait patterns. Key innovations include gait-aware path planning, balance-constrained navigation, and footstep planning that ensures stable and safe navigation. The integration with Isaac ROS provides GPU acceleration for real-time performance while maintaining the precision required for humanoid-specific constraints. Proper configuration and testing ensure that these planners enable humanoid robots to navigate complex human environments safely and efficiently.

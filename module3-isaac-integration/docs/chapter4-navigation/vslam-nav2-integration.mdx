@@ -1,0 +1,1333 @@
+---
+title: "VSLAM and Nav2 Integration"
+description: "Seamless integration between Visual SLAM and Nav2 for enhanced humanoid robot navigation"
+sidebar_position: 5
+---
+
+# VSLAM and Nav2 Integration
+
+## Introduction
+
+The integration between Visual SLAM (VSLAM) and Navigation2 (Nav2) is crucial for enabling autonomous humanoid robots to navigate effectively in unknown or dynamic environments. This integration combines the spatial awareness provided by VSLAM with the navigation capabilities of Nav2, creating a robust system for localization and path planning in human-centric environments.
+
+## Architecture Overview
+
+### Integration Architecture
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Isaac Sim     │    │   VSLAM Node    │    │   Nav2 Stack    │
+│                 │    │                 │    │                 │
+│ • Camera Images │───▶│ • Feature Det.  │───▶│ • Global Planner│
+│ • Sensor Data   │    │ • Pose Est.     │    │ • Local Planner │
+│ • Ground Truth  │    │ • Map Building  │    │ • Controller    │
+└─────────────────┘    │ • Loop Closure  │    │ • Recovery      │
+                       └─────────────────┘    └─────────────────┘
+                              │                       │
+                              ▼                       ▼
+                       ┌─────────────────┐    ┌─────────────────┐
+│   TF Transform    │    │   Costmap       │
+│                 │    │                 │
+│ • Camera to Map │    │ • Obstacle Layer│
+│ • Sensor Fusion │    │ • Inflation     │
+│ • Calibration   │    │ • Voxel Layer   │
+└─────────────────┘    └─────────────────┘
+```
+
+### Key Integration Points
+- **Pose Estimation**: VSLAM provides localization for Nav2
+- **Map Building**: VSLAM contributes to costmap generation
+- **Loop Closure**: VSLAM enhances Nav2's global localization
+- **Sensor Fusion**: Integration of visual and other sensors
+
+## VSLAM-Nav2 Communication Patterns
+
+### Data Flow Integration
+```python
+# Example: VSLAM-Nav2 integration node
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import PoseStamped, TransformStamped
+from nav_msgs.msg import Odometry, OccupancyGrid
+from sensor_msgs.msg import Image, CameraInfo
+from tf2_ros import TransformBroadcaster, Buffer, TransformListener
+from visualization_msgs.msg import MarkerArray
+import message_filters
+import numpy as np
+
+class VSLAMNav2Integrator(Node):
+    def __init__(self):
+        super().__init__('vslam_nav2_integrator')
+
+        # VSLAM subscribers
+        self.vslam_pose_sub = self.create_subscription(
+            PoseStamped, '/vslam/pose', self.vslam_pose_callback, 10
+        )
+        self.vslam_odom_sub = self.create_subscription(
+            Odometry, '/vslam/odometry', self.vslam_odom_callback, 10
+        )
+        self.vslam_map_sub = self.create_subscription(
+            OccupancyGrid, '/vslam/map', self.vslam_map_callback, 10
+        )
+
+        # Nav2 publishers (to override or supplement)
+        self.nav2_pose_pub = self.create_publisher(
+            PoseStamped, '/localization/pose', 10
+        )
+        self.fused_map_pub = self.create_publisher(
+            OccupancyGrid, '/fused_map', 10
+        )
+
+        # TF broadcasters for VSLAM poses
+        self.tf_broadcaster = TransformBroadcaster(self)
+
+        # Internal state
+        self.vslam_pose = None
+        self.nav2_pose = None
+        self.pose_fusion_active = True
+        self.map_fusion_active = True
+
+        # Fused pose publisher timer
+        self.pose_fusion_timer = self.create_timer(0.05, self.publish_fused_pose)  # 20 Hz
+
+        # Parameters for fusion
+        self.declare_parameter('vslam_weight', 0.7)
+        self.declare_parameter('nav2_weight', 0.3)
+        self.declare_parameter('max_pose_difference', 0.5)  # meters
+        self.declare_parameter('enable_sensor_fusion', True)
+
+    def vslam_pose_callback(self, msg):
+        """Handle VSLAM pose updates"""
+        self.vslam_pose = msg
+        self.update_fused_pose()
+
+        # Broadcast TF transform from VSLAM
+        if self.pose_fusion_active:
+            self.broadcast_vslam_transform(msg)
+
+    def vslam_odom_callback(self, msg):
+        """Handle VSLAM odometry updates"""
+        # Process odometry for motion prediction
+        self.process_vslam_odometry(msg)
+
+    def vslam_map_callback(self, msg):
+        """Handle VSLAM map updates"""
+        if self.map_fusion_active:
+            fused_map = self.fuse_vslam_nav2_maps(msg)
+            self.fused_map_pub.publish(fused_map)
+
+    def nav2_pose_callback(self, msg):
+        """Handle Nav2 pose updates (if available separately)"""
+        self.nav2_pose = msg
+        self.update_fused_pose()
+
+    def update_fused_pose(self):
+        """Update fused pose based on VSLAM and Nav2 data"""
+        if not self.vslam_pose or not self.nav2_pose:
+            return
+
+        # Check if poses are consistent
+        pose_diff = self.calculate_pose_difference(self.vslam_pose, self.nav2_pose)
+
+        if pose_diff > self.get_parameter('max_pose_difference').value:
+            # Poses are inconsistent, investigate
+            self.get_logger().warn(f"Pose inconsistency detected: {pose_diff}m")
+            # Decide which pose to trust more based on confidence
+            self.select_best_pose()
+        else:
+            # Fuse poses based on confidence weights
+            fused_pose = self.fuse_poses_by_weight(self.vslam_pose, self.nav2_pose)
+            self.publish_fused_pose_msg(fused_pose)
+
+    def calculate_pose_difference(self, pose1, pose2):
+        """Calculate spatial difference between two poses"""
+        dx = pose1.pose.position.x - pose2.pose.position.x
+        dy = pose1.pose.position.y - pose2.pose.position.y
+        dz = pose1.pose.position.z - pose2.pose.position.z
+
+        distance = np.sqrt(dx*dx + dy*dy + dz*dz)
+        return distance
+
+    def fuse_poses_by_weight(self, vslam_pose, nav2_pose):
+        """Fuse poses based on declared weights"""
+        vslam_weight = self.get_parameter('vslam_weight').value
+        nav2_weight = self.get_parameter('nav2_weight').value
+
+        # Simple weighted fusion (in practice, this would be more sophisticated)
+        fused_pose = PoseStamped()
+        fused_pose.header = vslam_pose.header  # Use the more recent header
+
+        # Weighted average of positions
+        fused_pose.pose.position.x = (
+            vslam_weight * vslam_pose.pose.position.x +
+            nav2_weight * nav2_pose.pose.position.x
+        )
+        fused_pose.pose.position.y = (
+            vslam_weight * vslam_pose.pose.position.y +
+            nav2_weight * nav2_pose.pose.position.y
+        )
+        fused_pose.pose.position.z = (
+            vslam_weight * vslam_pose.pose.position.z +
+            nav2_weight * nav2_pose.pose.position.z
+        )
+
+        # For orientation, use the one with higher confidence or VSLAM
+        # (in practice, would use quaternion slerp)
+        fused_pose.pose.orientation = vslam_pose.pose.orientation
+
+        return fused_pose
+
+    def broadcast_vslam_transform(self, pose_msg):
+        """Broadcast VSLAM-derived transform"""
+        t = TransformStamped()
+
+        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.frame_id = 'map'
+        t.child_frame_id = 'vslam_odom'
+
+        # Set transform from pose
+        t.transform.translation.x = pose_msg.pose.position.x
+        t.transform.translation.y = pose_msg.pose.position.y
+        t.transform.translation.z = pose_msg.pose.position.z
+        t.transform.rotation = pose_msg.pose.orientation
+
+        self.tf_broadcaster.sendTransform(t)
+
+    def process_vslam_odometry(self, odom_msg):
+        """Process VSLAM odometry for motion prediction"""
+        # Use VSLAM odometry to predict motion between VSLAM updates
+        # This helps maintain smooth navigation during VSLAM processing delays
+        pass
+
+    def fuse_vslam_nav2_maps(self, vslam_map):
+        """Fuse VSLAM map with Nav2 costmap"""
+        # Get current Nav2 costmap
+        nav2_costmap = self.get_current_nav2_costmap()
+
+        # Fuse maps based on reliability and recency
+        fused_map = self.combine_costmaps(vslam_map, nav2_costmap)
+
+        return fused_map
+
+    def get_current_nav2_costmap(self):
+        """Get current Nav2 costmap"""
+        # This would interface with Nav2's costmap server
+        # to retrieve the current local/global costmap
+        pass
+
+    def combine_costmaps(self, vslam_map, nav2_costmap):
+        """Combine VSLAM and Nav2 costmaps"""
+        # Implement costmap fusion algorithm
+        # Consider: recency, reliability, sensor characteristics
+        pass
+
+    def select_best_pose(self):
+        """Select best pose when inconsistency is detected"""
+        # Use additional sensors (IMU, wheel odometry) to determine
+        # which pose estimate is more reliable
+        pass
+
+    def publish_fused_pose_msg(self, fused_pose):
+        """Publish the fused pose message"""
+        self.nav2_pose_pub.publish(fused_pose)
+
+    def publish_fused_pose(self):
+        """Timer callback to publish fused pose regularly"""
+        if self.vslam_pose:
+            # Publish current VSLAM pose if no fusion is active
+            self.nav2_pose_pub.publish(self.vslam_pose)
+```
+
+## Sensor Fusion Architecture
+
+### Multi-Sensor Integration
+```python
+# Example: Multi-sensor fusion for VSLAM-Nav2
+class MultiSensorFusion:
+    def __init__(self):
+        # Sensor data sources
+        self.vslam_data = None
+        self.imu_data = None
+        self.odom_data = None
+        self.lidar_data = None
+
+        # Fusion parameters
+        self.vslam_confidence = 0.8
+        self.imu_confidence = 0.7
+        self.odom_confidence = 0.6
+        self.lidar_confidence = 0.9
+
+        # Covariance matrices for each sensor
+        self.vslam_covariance = np.eye(6) * 0.1
+        self.imu_covariance = np.eye(6) * 0.05
+        self.odom_covariance = np.eye(6) * 0.2
+        self.lidar_covariance = np.eye(6) * 0.08
+
+    def fuse_sensor_data(self, vslam_pose, imu_data, odom_data, lidar_data):
+        """Fuse data from multiple sensors using Kalman Filter approach"""
+        # Convert sensor data to state vectors
+        vslam_state = self.pose_to_state(vslam_pose)
+        imu_state = self.imu_to_state(imu_data)
+        odom_state = self.odom_to_state(odom_data)
+        lidar_state = self.lidar_to_state(lidar_data)
+
+        # Perform weighted fusion based on sensor reliability
+        fused_state = self.weighted_state_fusion([
+            (vslam_state, self.vslam_covariance),
+            (imu_state, self.imu_covariance),
+            (odom_state, self.odom_covariance),
+            (lidar_state, self.lidar_covariance)
+        ])
+
+        return self.state_to_pose(fused_state)
+
+    def weighted_state_fusion(self, sensor_states_and_covariances):
+        """Weighted fusion of multiple sensor states"""
+        # Use inverse covariance weighting (Kalman Filter approach)
+        total_weighted_state = np.zeros(6)
+        total_information_matrix = np.zeros((6, 6))
+
+        for state, covariance in sensor_states_and_covariances:
+            # Information matrix is inverse of covariance
+            information = np.linalg.inv(covariance)
+            weighted_state = information @ state
+
+            total_weighted_state += weighted_state
+            total_information_matrix += information
+
+        # Compute fused state
+        fused_covariance = np.linalg.inv(total_information_matrix)
+        fused_state = fused_covariance @ total_weighted_state
+
+        return fused_state
+
+    def pose_to_state(self, pose):
+        """Convert PoseStamped to state vector [x, y, z, roll, pitch, yaw]"""
+        state = np.zeros(6)
+        state[0] = pose.pose.position.x
+        state[1] = pose.pose.position.y
+        state[2] = pose.pose.position.z
+
+        # Convert quaternion to euler angles
+        quat = pose.pose.orientation
+        roll, pitch, yaw = self.quaternion_to_euler(quat.x, quat.y, quat.z, quat.w)
+        state[3] = roll
+        state[4] = pitch
+        state[5] = yaw
+
+        return state
+
+    def quaternion_to_euler(self, x, y, z, w):
+        """Convert quaternion to euler angles"""
+        # Roll (x-axis rotation)
+        sinr_cosp = 2 * (w * x + y * z)
+        cosr_cosp = 1 - 2 * (x * x + y * y)
+        roll = np.arctan2(sinr_cosp, cosr_cosp)
+
+        # Pitch (y-axis rotation)
+        sinp = 2 * (w * y - z * x)
+        if np.abs(sinp) >= 1:
+            pitch = np.copysign(np.pi / 2, sinp)
+        else:
+            pitch = np.arcsin(sinp)
+
+        # Yaw (z-axis rotation)
+        siny_cosp = 2 * (w * z + x * y)
+        cosy_cosp = 1 - 2 * (y * y + z * z)
+        yaw = np.arctan2(siny_cosp, cosy_cosp)
+
+        return roll, pitch, yaw
+
+    def imu_to_state(self, imu_data):
+        """Convert IMU data to state vector"""
+        # Extract position from integrated IMU data
+        # (simplified - in practice, this would involve integration)
+        state = np.zeros(6)
+        # Position from integration of acceleration
+        # Orientation from IMU
+        state[3] = np.arctan2(2*(imu_data.orientation.w*imu_data.orientation.x +
+                                imu_data.orientation.y*imu_data.orientation.z),
+                              1 - 2*(imu_data.orientation.x**2 +
+                                    imu_data.orientation.y**2))
+        state[4] = np.arcsin(2*(imu_data.orientation.w*imu_data.orientation.y -
+                               imu_data.orientation.z*imu_data.orientation.x))
+        state[5] = np.arctan2(2*(imu_data.orientation.w*imu_data.orientation.z +
+                                imu_data.orientation.x*imu_data.orientation.y),
+                              1 - 2*(imu_data.orientation.y**2 +
+                                    imu_data.orientation.z**2))
+        return state
+```
+
+## Isaac ROS Integration
+
+### Isaac ROS VSLAM-Nav2 Bridge
+```python
+# Example: Isaac ROS integration for VSLAM-Nav2
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import Image, Imu, PointCloud2
+from geometry_msgs.msg import PoseStamped
+from nav_msgs.msg import OccupancyGrid
+from tf2_ros import TransformListener, Buffer
+from builtin_interfaces.msg import Time
+import numpy as np
+
+class IsaacROSNav2Bridge(Node):
+    def __init__(self):
+        super().__init__('isaac_ros_nav2_bridge')
+
+        # Isaac Sim subscribers
+        self.rgb_image_sub = self.create_subscription(
+            Image, '/isaac/sim/camera/rgb', self.rgb_image_callback, 10
+        )
+        self.depth_image_sub = self.create_subscription(
+            Image, '/isaac/sim/camera/depth', self.depth_image_callback, 10
+        )
+        self.imu_sub = self.create_subscription(
+            Imu, '/isaac/sim/imu', self.imu_callback, 10
+        )
+        self.odom_sub = self.create_subscription(
+            Odometry, '/isaac/sim/odometry', self.odom_callback, 10
+        )
+
+        # VSLAM node publishers (to trigger Isaac ROS VSLAM)
+        self.vslam_trigger_pub = self.create_publisher(
+            String, '/vslam/trigger', 10
+        )
+
+        # Fused localization publisher
+        self.fused_pose_pub = self.create_publisher(
+            PoseStamped, '/fused_localization/pose', 10
+        )
+
+        # Isaac ROS VSLAM components
+        self.isaac_vslam_node = self.initialize_isaac_vslam()
+        self.isaac_nav2_integrator = VSLAMNav2Integrator()
+
+        # TF buffer for coordinate transformations
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+
+        # Processing state
+        self.synchronized_data = {
+            'rgb_image': None,
+            'depth_image': None,
+            'imu_data': None,
+            'odom_data': None
+        }
+        self.last_process_time = self.get_clock().now()
+
+        # Timer for processing synchronization
+        self.process_timer = self.create_timer(0.1, self.process_synchronized_data)
+
+    def rgb_image_callback(self, msg):
+        """Handle RGB image from Isaac Sim"""
+        self.synchronized_data['rgb_image'] = msg
+        self.check_synchronization()
+
+    def depth_image_callback(self, msg):
+        """Handle depth image from Isaac Sim"""
+        self.synchronized_data['depth_image'] = msg
+        self.check_synchronization()
+
+    def imu_callback(self, msg):
+        """Handle IMU data from Isaac Sim"""
+        self.synchronized_data['imu_data'] = msg
+        self.check_synchronization()
+
+    def odom_callback(self, msg):
+        """Handle odometry data from Isaac Sim"""
+        self.synchronized_data['odom_data'] = msg
+        self.check_synchronization()
+
+    def check_synchronization(self):
+        """Check if all sensor data is synchronized"""
+        if all(data is not None for data in self.synchronized_data.values()):
+            # All data is available, process it
+            self.process_synchronized_data()
+
+    def process_synchronized_data(self):
+        """Process synchronized sensor data"""
+        current_time = self.get_clock().now()
+
+        # Only process if enough time has passed (avoid overwhelming)
+        if (current_time - self.last_process_time).nanoseconds / 1e9 > 0.1:  # 10 Hz max
+            # Process with Isaac ROS VSLAM
+            vslam_result = self.process_with_isaac_vslam(
+                self.synchronized_data['rgb_image'],
+                self.synchronized_data['depth_image']
+            )
+
+            # Integrate with Nav2 using sensor fusion
+            fused_pose = self.integrate_with_nav2(
+                vslam_result,
+                self.synchronized_data['imu_data'],
+                self.synchronized_data['odom_data']
+            )
+
+            # Publish fused result
+            self.fused_pose_pub.publish(fused_pose)
+
+            # Update last process time
+            self.last_process_time = current_time
+
+            # Clear synchronized data to wait for next batch
+            self.synchronized_data = {k: None for k in self.synchronized_data.keys()}
+
+    def process_with_isaac_vslam(self, rgb_image, depth_image):
+        """Process images with Isaac ROS VSLAM"""
+        # This would call Isaac ROS VSLAM components
+        # For now, return a mock result
+        pose_result = PoseStamped()
+        pose_result.header.stamp = self.get_clock().now().to_msg()
+        pose_result.header.frame_id = 'map'
+
+        # Mock pose (in practice, this comes from Isaac ROS VSLAM)
+        pose_result.pose.position.x += 0.01  # Increment for demonstration
+        pose_result.pose.position.y += 0.005
+        pose_result.pose.orientation.w = 1.0
+
+        return pose_result
+
+    def integrate_with_nav2(self, vslam_pose, imu_data, odom_data):
+        """Integrate VSLAM result with Nav2 using sensor fusion"""
+        # Apply sensor fusion to combine VSLAM with other sensors
+        fusion_module = MultiSensorFusion()
+        fused_pose = fusion_module.fuse_sensor_data(
+            vslam_pose, imu_data, odom_data, None  # lidar_data would come from elsewhere
+        )
+
+        return fused_pose
+
+    def initialize_isaac_vslam(self):
+        """Initialize Isaac ROS VSLAM components"""
+        # Initialize Isaac ROS VSLAM nodes and components
+        # This would set up the Isaac ROS Visual SLAM pipeline
+        pass
+```
+
+## Map Integration and Fusion
+
+### Costmap Enhancement with VSLAM
+```python
+# Example: VSLAM-enhanced costmap
+from nav2_costmap_2d.layers import Layer
+from nav2_costmap_2d import Costmap2D
+from sensor_msgs.msg import PointCloud2
+from visualization_msgs.msg import Marker, MarkerArray
+import numpy as np
+
+class VSLAMEnhancedLayer(Layer):
+    def __init__(self, name, costmap):
+        super().__init__(name)
+        self.costmap = costmap
+        self.enabled = True
+
+        # VSLAM-specific data
+        self.vslam_map_data = None
+        self.vslam_features = []
+        self.dynamic_objects = []
+
+    def onInitialize(self):
+        """Initialize the VSLAM-enhanced layer"""
+        self.layered_costmap = self.getLayeredCostmap()
+        self.matchSize()
+
+        # Subscribe to VSLAM map updates
+        self.vslam_map_sub = self.create_subscription(
+            OccupancyGrid, '/vslam/map', self.vslam_map_callback, 10
+        )
+        self.vslam_features_sub = self.create_subscription(
+            PointCloud2, '/vslam/features', self.vslam_features_callback, 10
+        )
+
+    def updateBounds(self, robot_x, robot_y, robot_yaw, min_x, min_y, max_x, max_y):
+        """Update bounds considering VSLAM data"""
+        if not self.enabled:
+            return
+
+        # Expand bounds if VSLAM data suggests need for wider view
+        # This could be based on feature density or map uncertainty
+        expansion = 0.5  # meters
+        min_x -= expansion
+        min_y -= expansion
+        max_x += expansion
+        max_y += expansion
+
+    def updateCosts(self, master_grid, min_i, min_j, max_i, max_j):
+        """Update costs with VSLAM-enhanced information"""
+        if not self.enabled:
+            return
+
+        # Apply VSLAM-based costs to master grid
+        for i in range(min_i, max_i):
+            for j in range(min_j, max_j):
+                world_x, world_y = self.costmap.mapToWorld(i, j)
+
+                # Get VSLAM-based cost for this cell
+                vslam_cost = self.get_vslam_cost(world_x, world_y)
+
+                # Combine with existing cost
+                current_cost = master_grid.getCost(i, j)
+                combined_cost = self.combine_costs(current_cost, vslam_cost)
+
+                master_grid.setCost(i, j, combined_cost)
+
+    def get_vslam_cost(self, x, y):
+        """Get cost based on VSLAM data"""
+        # Check VSLAM map for known obstacles
+        if self.vslam_map_data:
+            map_cost = self.sample_vslam_map(x, y)
+        else:
+            map_cost = 0
+
+        # Check VSLAM features for potential obstacles
+        feature_cost = self.calculate_feature_based_cost(x, y)
+
+        # Check for dynamic objects
+        dynamic_cost = self.calculate_dynamic_object_cost(x, y)
+
+        # Combine all costs
+        total_cost = max(map_cost, feature_cost, dynamic_cost)
+        return total_cost
+
+    def sample_vslam_map(self, x, y):
+        """Sample VSLAM map at given coordinates"""
+        if not self.vslam_map_data:
+            return 0
+
+        # Convert world coordinates to map coordinates
+        map_x = int((x - self.vslam_map_data.info.origin.position.x) / self.vslam_map_data.info.resolution)
+        map_y = int((y - self.vslam_map_data.info.origin.position.y) / self.vslam_map_data.info.resolution)
+
+        # Check bounds
+        if (0 <= map_x < self.vslam_map_data.info.width and
+            0 <= map_y < self.vslam_map_data.info.height):
+
+            # Get cost from VSLAM map
+            index = map_y * self.vslam_map_data.info.width + map_x
+            vslam_cost = self.vslam_map_data.data[index]
+
+            # Convert to Nav2 costmap format
+            return min(254, vslam_cost)  # Cap at 254 (lethal obstacle)
+        else:
+            return 0
+
+    def calculate_feature_based_cost(self, x, y):
+        """Calculate cost based on VSLAM features"""
+        # If there are many VSLAM features in this area,
+        # it might indicate cluttered or uncertain space
+        feature_density = self.count_features_in_area(x, y, radius=0.5)
+
+        # Higher feature density could mean more uncertainty or obstacles
+        if feature_density > 50:  # threshold
+            return 100  # High cost for uncertain areas
+        else:
+            return 0
+
+    def calculate_dynamic_object_cost(self, x, y):
+        """Calculate cost for dynamic objects detected by VSLAM"""
+        for obj in self.dynamic_objects:
+            dist = np.sqrt((x - obj.position.x)**2 + (y - obj.position.y)**2)
+            if dist < obj.radius:  # Object influence radius
+                # Calculate cost based on distance and object properties
+                cost = int(200 * (1.0 - dist / obj.radius))  # Higher cost closer to object
+                return min(254, cost)  # Cap at lethal obstacle
+
+        return 0
+
+    def combine_costs(self, existing_cost, vslam_cost):
+        """Combine existing cost with VSLAM-enhanced cost"""
+        # Use maximum to be conservative about obstacles
+        # Alternatively, could use weighted average
+        return max(existing_cost, vslam_cost)
+
+    def vslam_map_callback(self, msg):
+        """Handle VSLAM map updates"""
+        self.vslam_map_data = msg
+
+    def vslam_features_callback(self, msg):
+        """Handle VSLAM features updates"""
+        # Process VSLAM features for dynamic object detection
+        self.vslam_features = msg
+        self.detect_dynamic_objects()
+
+    def detect_dynamic_objects(self):
+        """Detect dynamic objects from VSLAM features"""
+        # Analyze VSLAM features to identify moving objects
+        # This would involve tracking features over time
+        # and identifying those with consistent motion patterns
+        pass
+```
+
+## Loop Closure Integration
+
+### Enhanced Global Localization
+```python
+# Example: Loop closure integration for global localization
+class LoopClosureIntegrator:
+    def __init__(self, nav2_localizer, vslam_backend):
+        self.nav2_localizer = nav2_localizer
+        self.vslam_backend = vslam_backend
+        self.loop_closure_detector = self.initialize_loop_closure_detector()
+        self.localization_map = None
+        self.vslam_keyframes = []
+
+    def initialize_loop_closure_detector(self):
+        """Initialize loop closure detection system"""
+        # This would use VSLAM backend's loop closure capabilities
+        # combined with Nav2's localization system
+        pass
+
+    def detect_possible_loop_closure(self, current_pose, current_features):
+        """Detect if robot has returned to a known location"""
+        # Compare current features with stored keyframes
+        potential_matches = self.find_potential_matches(current_features)
+
+        for match in potential_matches:
+            # Verify potential loop closure
+            if self.verify_loop_closure(match):
+                # Handle confirmed loop closure
+                self.handle_loop_closure(match)
+                return True
+
+        return False
+
+    def find_potential_matches(self, current_features):
+        """Find potential loop closure matches"""
+        potential_matches = []
+
+        for i, keyframe in enumerate(self.vslam_keyframes):
+            # Compare features between current view and keyframe
+            similarity = self.compare_features(current_features, keyframe.features)
+
+            if similarity > self.loop_closure_threshold:
+                potential_matches.append({
+                    'keyframe_id': i,
+                    'similarity': similarity,
+                    'estimated_pose': keyframe.pose
+                })
+
+        return potential_matches
+
+    def verify_loop_closure(self, potential_match):
+        """Verify if potential match is a true loop closure"""
+        # Perform geometric verification
+        # Check if poses are consistent with expected transformation
+        # Verify using multiple feature matches
+        pass
+
+    def handle_loop_closure(self, confirmed_match):
+        """Handle confirmed loop closure"""
+        # Update global map with loop closure constraint
+        self.update_global_map_with_loop_closure(confirmed_match)
+
+        # Correct accumulated drift
+        self.correct_drift_using_loop_closure(confirmed_match)
+
+        # Update Nav2 localization with corrected pose
+        self.update_nav2_localization(confirmed_match.corrected_pose)
+
+    def update_global_map_with_loop_closure(self, match):
+        """Update global map using loop closure constraint"""
+        # Add loop closure constraint to optimization problem
+        # This would involve adjusting poses of keyframes between
+        # the current location and the matched location
+        pass
+
+    def correct_drift_using_loop_closure(self, match):
+        """Correct accumulated drift using loop closure"""
+        # Use optimization techniques (e.g., pose graph optimization)
+        # to distribute the loop closure correction among keyframes
+        pass
+
+    def update_nav2_localization(self, corrected_pose):
+        """Update Nav2 localization with corrected pose"""
+        # Publish corrected pose to Nav2 localization system
+        # This helps Nav2 maintain accurate global position
+        pass
+
+    def integrate_with_nav2_global_localization(self):
+        """Integrate VSLAM loop closure with Nav2 global localization"""
+        # When VSLAM detects loop closure, trigger Nav2's global localization
+        # to refine the robot's belief about its position in the map
+        if self.vslam_backend.has_loop_closure():
+            # Request Nav2 to perform global localization
+            self.nav2_localizer.request_global_localization()
+
+            # Provide VSLAM's pose estimate as initial guess
+            vslam_pose = self.vslam_backend.get_current_pose()
+            self.nav2_localizer.set_initial_pose(vslam_pose)
+```
+
+## Performance Optimization
+
+### Real-Time Considerations
+```python
+# Example: Performance-optimized VSLAM-Nav2 integration
+class OptimizedVSLAMNav2Integrator:
+    def __init__(self):
+        self.max_processing_time = 33.0  # ms (30 FPS target)
+        self.enable_adaptive_processing = True
+        self.processing_budget = 33.0  # ms per cycle
+        self.vslam_processing_enabled = True
+        self.nav2_update_frequency = 10.0  # Hz
+
+        # Threading for parallel processing
+        self.vslam_thread = None
+        self.nav2_thread = None
+        self.fusion_thread = None
+
+        # Memory pools for real-time performance
+        self.memory_pool = self.initialize_memory_pool()
+
+    def adaptive_integration_cycle(self, sensor_data, available_time):
+        """Adaptively integrate VSLAM and Nav2 based on available time"""
+        start_time = time.time()
+
+        # Quick integration if time is limited
+        if available_time < self.max_processing_time * 0.3:
+            return self.quick_integration(sensor_data)
+
+        # Moderate integration for medium time
+        elif available_time < self.max_processing_time * 0.7:
+            return self.moderate_integration(sensor_data)
+
+        # Full integration if sufficient time available
+        else:
+            return self.full_integration(sensor_data)
+
+    def quick_integration(self, sensor_data):
+        """Perform quick VSLAM-Nav2 integration"""
+        # Use cached VSLAM results if recent
+        # Perform lightweight fusion
+        # Publish results quickly
+        pass
+
+    def moderate_integration(self, sensor_data):
+        """Perform moderate VSLAM-Nav2 integration"""
+        # Run VSLAM with reduced processing
+        # Use approximate fusion methods
+        # Balance accuracy and speed
+        pass
+
+    def full_integration(self, sensor_data):
+        """Perform full VSLAM-Nav2 integration"""
+        # Run full VSLAM processing
+        # Perform complete sensor fusion
+        # Update all components
+        pass
+
+    def initialize_memory_pool(self):
+        """Initialize memory pool for real-time performance"""
+        # Pre-allocate memory for common operations
+        # Reduce garbage collection during real-time processing
+        pool = {
+            'transform_matrices': [np.eye(4) for _ in range(10)],
+            'pose_vectors': [np.zeros(6) for _ in range(10)],
+            'covariance_matrices': [np.eye(6) for _ in 10],
+            'feature_arrays': [np.zeros((1000, 2)) for _ in range(5)]  # Max 1000 features
+        }
+        return pool
+
+    def parallel_processing_integration(self, sensor_data):
+        """Use parallel processing for VSLAM-Nav2 integration"""
+        # Process VSLAM in one thread
+        vslam_future = self.vslam_executor.submit(
+            self.process_vslam_parallel, sensor_data['camera']
+        )
+
+        # Process Nav2 updates in another thread
+        nav2_future = self.nav2_executor.submit(
+            self.process_nav2_parallel, sensor_data['other_sensors']
+        )
+
+        # Wait for results and fuse them
+        vslam_result = vslam_future.result(timeout=0.03)  # 30ms timeout
+        nav2_result = nav2_future.result(timeout=0.03)    # 30ms timeout
+
+        # Fuse results
+        fused_result = self.fuse_results_parallel(vslam_result, nav2_result)
+
+        return fused_result
+
+    def process_vslam_parallel(self, camera_data):
+        """Process VSLAM in parallel"""
+        # Run VSLAM processing independently
+        # Return results when complete
+        pass
+
+    def process_nav2_parallel(self, sensor_data):
+        """Process Nav2 in parallel"""
+        # Run Nav2 processing independently
+        # Return results when complete
+        pass
+
+    def fuse_results_parallel(self, vslam_result, nav2_result):
+        """Fuse VSLAM and Nav2 results in parallel"""
+        # Combine results from both processing threads
+        pass
+```
+
+## Isaac ROS GPU Acceleration
+
+### GPU-Accelerated Integration
+```python
+# Example: GPU-accelerated VSLAM-Nav2 integration
+import cupy as cp  # GPU computing with NumPy-compatible interface
+from nav2_msgs.action import NavigateToPose
+from geometry_msgs.msg import PoseStamped
+
+class GPUAcceleratedVSLAMNav2Integrator:
+    def __init__(self):
+        if cp.cuda.is_available():
+            self.gpu_available = True
+            self.get_logger().info("GPU acceleration enabled for VSLAM-Nav2 integration")
+        else:
+            self.gpu_available = False
+            self.get_logger().warn("GPU not available, using CPU for VSLAM-Nav2 integration")
+
+        # GPU memory management
+        self.gpu_memory_pool = self.initialize_gpu_memory_pool()
+
+        # GPU-accelerated components
+        self.gpu_fusion_kernel = self.compile_gpu_fusion_kernel()
+        self.gpu_map_processing_kernel = self.compile_gpu_map_kernel()
+
+    def initialize_gpu_memory_pool(self):
+        """Initialize GPU memory pool for efficient allocation"""
+        if not self.gpu_available:
+            return None
+
+        # Pre-allocate GPU memory for common operations
+        memory_pool = {
+            'transform_matrices': cp.empty((10, 4, 4), dtype=cp.float32),
+            'pose_vectors': cp.empty((10, 6), dtype=cp.float32),
+            'covariance_matrices': cp.empty((10, 6, 6), dtype=cp.float32),
+            'feature_data': cp.empty((2000, 128), dtype=cp.float32),  # 2000 features, 128-dim descriptors
+            'costmap_data': cp.empty((1000, 1000), dtype=cp.uint8)   # 1000x1000 costmap
+        }
+
+        return memory_pool
+
+    def gpu_accelerated_fusion(self, vslam_pose, nav2_pose, vslam_covariance, nav2_covariance):
+        """Perform sensor fusion using GPU acceleration"""
+        if not self.gpu_available:
+            # Fall back to CPU fusion
+            return self.cpu_fusion(vslam_pose, nav2_pose, vslam_covariance, nav2_covariance)
+
+        # Transfer data to GPU
+        gpu_vslam_pose = cp.asarray(vslam_pose)
+        gpu_nav2_pose = cp.asarray(nav2_pose)
+        gpu_vslam_cov = cp.asarray(vslam_covariance)
+        gpu_nav2_cov = cp.asarray(nav2_covariance)
+
+        # Perform fusion on GPU using custom kernel
+        gpu_fused_pose = self.gpu_fusion_kernel(
+            gpu_vslam_pose, gpu_nav2_pose,
+            gpu_vslam_cov, gpu_nav2_cov
+        )
+
+        # Transfer result back to CPU
+        fused_pose = cp.asnumpy(gpu_fused_pose)
+
+        return fused_pose
+
+    def compile_gpu_fusion_kernel(self):
+        """Compile GPU kernel for sensor fusion"""
+        if not self.gpu_available:
+            return None
+
+        # Define CUDA kernel for weighted sensor fusion
+        kernel_code = '''
+        extern "C" __global__
+        void sensor_fusion_kernel(
+            float* vslam_pose, float* nav2_pose,
+            float* vslam_cov_inv, float* nav2_cov_inv,
+            float* fused_pose, float weight_vslam, float weight_nav2
+        ) {
+            int idx = blockIdx.x * blockDim.x + threadIdx.x;
+            if (idx >= 6) return;  // Only 6 DOF (x, y, z, roll, pitch, yaw)
+
+            // Weighted fusion using inverse covariance weighting
+            float numerator = weight_vslam * vslam_cov_inv[idx] * vslam_pose[idx] +
+                             weight_nav2 * nav2_cov_inv[idx] * nav2_pose[idx];
+            float denominator = weight_vslam * vslam_cov_inv[idx] + weight_nav2 * nav2_cov_inv[idx];
+
+            fused_pose[idx] = numerator / denominator;
+        }
+        '''
+
+        # Compile and return kernel
+        # In practice, this would use CuPy's elementwise kernel or RawKernel
+        return self.create_gpu_fusion_operation()
+
+    def create_gpu_fusion_operation(self):
+        """Create GPU fusion operation"""
+        def fusion_op(vslam_pose, nav2_pose, vslam_cov, nav2_cov):
+            # Perform weighted fusion on GPU
+            # This is a simplified version
+            vslam_weight = 0.7
+            nav2_weight = 0.3
+
+            # Information matrix (inverse covariance) approach
+            vslam_info = cp.linalg.inv(vslam_cov)
+            nav2_info = cp.linalg.inv(nav2_cov)
+
+            # Weighted combination
+            fused_info = vslam_weight * vslam_info + nav2_weight * nav2_info
+            fused_cov = cp.linalg.inv(fused_info)
+
+            fused_pose_mean = cp.linalg.solve(fused_info,
+                                            vslam_weight * vslam_info @ vslam_pose +
+                                            nav2_weight * nav2_info @ nav2_pose)
+
+            return fused_pose_mean, fused_cov
+
+        return fusion_op
+
+    def gpu_accelerated_map_processing(self, vslam_map, nav2_costmap):
+        """Process maps using GPU acceleration"""
+        if not self.gpu_available:
+            return self.cpu_map_processing(vslam_map, nav2_costmap)
+
+        # Transfer maps to GPU
+        gpu_vslam_map = cp.asarray(vslam_map.data)
+        gpu_nav2_costmap = cp.asarray(nav2_costmap.data)
+
+        # Perform map fusion on GPU
+        gpu_fused_map = self.gpu_map_processing_kernel(
+            gpu_vslam_map, gpu_nav2_costmap
+        )
+
+        # Transfer result back to CPU
+        fused_map = cp.asnumpy(gpu_fused_map)
+
+        # Create OccupancyGrid message
+        fused_map_msg = OccupancyGrid()
+        fused_map_msg.data = fused_map.flatten().tolist()
+
+        return fused_map_msg
+
+    def compile_gpu_map_kernel(self):
+        """Compile GPU kernel for map processing"""
+        if not self.gpu_available:
+            return None
+
+        # This would implement efficient map fusion on GPU
+        # using parallel processing for each map cell
+        pass
+```
+
+## Configuration and Parameters
+
+### VSLAM-Nav2 Integration Configuration
+```yaml
+# VSLAM-Nav2 integration configuration
+vslam_nav2_integration:
+  ros__parameters:
+    # Integration parameters
+    integration:
+      enable_sensor_fusion: true
+      vslam_weight: 0.7
+      nav2_weight: 0.3
+      max_pose_difference: 0.5  # meters
+      fusion_frequency: 20.0    # Hz
+      enable_loop_closure_integration: true
+      enable_dynamic_object_detection: true
+
+    # VSLAM parameters
+    vslam:
+      input_topics:
+        rgb_camera: "/camera/rgb/image_rect_color"
+        depth_camera: "/camera/depth/image_rect"
+        imu: "/imu/data"
+      processing_frequency: 10.0  # Hz
+      max_features: 2000
+      feature_quality: 0.01
+      enable_loop_closure: true
+      loop_closure_threshold: 0.7
+
+    # GPU acceleration
+    gpu:
+      enable_gpu_acceleration: true
+      gpu_device_id: 0
+      gpu_memory_fraction: 0.8
+      enable_tensorrt: true
+      tensorrt_precision: "fp16"
+
+    # Costmap enhancement
+    costmap_enhancement:
+      enable_vslam_layer: true
+      vslam_layer_weight: 1.5
+      dynamic_object_influence_radius: 0.8  # meters
+      feature_density_threshold: 50  # features per square meter
+
+    # Localization fusion
+    localization_fusion:
+      enable_pose_fusion: true
+      fusion_method: "information_filter"  # options: information_filter, weighted_average
+      covariance_threshold: 0.1
+      enable_outlier_detection: true
+      outlier_threshold: 1.0  # standard deviations
+
+    # Performance parameters
+    performance:
+      max_processing_time_ms: 33.0  # 30 FPS target
+      enable_adaptive_processing: true
+      processing_budget_ms: 30.0
+      enable_parallel_processing: true
+      thread_count: 4
+
+    # Isaac ROS specific
+    isaac_ros:
+      enable_gpu_vslam: true
+      enable_gpu_fusion: true
+      tensorrt_optimization: true
+      prediction_horizon: 0.5  # seconds for trajectory prediction
+```
+
+## Testing and Validation
+
+### Integration Testing
+```python
+# Example: VSLAM-Nav2 integration testing
+class VSLAMNav2IntegrationTester:
+    def __init__(self):
+        self.test_scenarios = [
+            "static_localization_accuracy",
+            "dynamic_navigation_performance",
+            "loop_closure_verification",
+            "sensor_failure_handling",
+            "computational_efficiency"
+        ]
+
+    def test_static_localization_accuracy(self):
+        """Test localization accuracy in static conditions"""
+        # Start in known location
+        ground_truth = self.get_ground_truth_pose()
+
+        # Run VSLAM-Nav2 integration
+        integration_node = VSLAMNav2Integrator()
+
+        # Collect pose estimates over time
+        estimates = []
+        for i in range(100):  # Collect 100 samples
+            estimate = integration_node.get_current_pose()
+            estimates.append(estimate)
+            time.sleep(0.1)  # 10 Hz sampling
+
+        # Calculate accuracy metrics
+        position_errors = []
+        orientation_errors = []
+
+        for est in estimates:
+            pos_err = self.calculate_position_error(est, ground_truth)
+            orient_err = self.calculate_orientation_error(est, ground_truth)
+
+            position_errors.append(pos_err)
+            orientation_errors.append(orient_err)
+
+        # Verify accuracy requirements
+        avg_pos_error = sum(position_errors) / len(position_errors)
+        avg_orient_error = sum(orientation_errors) / len(orientation_errors)
+
+        assert avg_pos_error < 0.1, f"Position error too high: {avg_pos_error}m"
+        assert avg_orient_error < 0.1, f"Orientation error too high: {avg_orient_error}rad"
+
+        return {
+            'avg_position_error': avg_pos_error,
+            'avg_orientation_error': avg_orient_error,
+            'std_position_error': np.std(position_errors),
+            'std_orientation_error': np.std(orientation_errors)
+        }
+
+    def test_dynamic_navigation_performance(self):
+        """Test navigation performance with VSLAM integration"""
+        # Set up navigation test environment
+        navigation_goal = PoseStamped()
+        navigation_goal.pose.position.x = 5.0
+        navigation_goal.pose.position.y = 5.0
+
+        # Start navigation with VSLAM-Nav2 integration
+        nav_result = self.execute_navigation_with_vslam_integration(navigation_goal)
+
+        # Verify navigation success
+        assert nav_result.success, "Navigation failed with VSLAM integration"
+
+        # Check path optimality
+        path_length = self.calculate_actual_path_length()
+        optimal_length = self.calculate_optimal_path_length(navigation_goal)
+
+        efficiency_ratio = path_length / optimal_length
+        assert efficiency_ratio < 1.2, f"Path efficiency too poor: {efficiency_ratio}"
+
+        return {
+            'success': nav_result.success,
+            'path_efficiency': efficiency_ratio,
+            'navigation_time': nav_result.execution_time,
+            'average_velocity': nav_result.average_velocity
+        }
+
+    def test_loop_closure_verification(self):
+        """Test loop closure functionality in VSLAM-Nav2 integration"""
+        # Navigate in a loop to return to starting area
+        loop_path = self.create_return_path()
+
+        # Execute navigation with loop closure enabled
+        self.enable_loop_closure_detection()
+        result = self.follow_path_with_loop_closure(loop_path)
+
+        # Verify loop closure detection and correction
+        loop_closure_detected = self.check_for_loop_closure_events(result)
+        position_drift_reduction = self.measure_drift_reduction(result)
+
+        assert loop_closure_detected, "Loop closure not detected when returning to known location"
+        assert position_drift_reduction > 0.5, f"Loop closure did not sufficiently reduce drift: {position_drift_reduction}"
+
+        return {
+            'loop_closure_detected': loop_closure_detected,
+            'drift_reduction_factor': position_drift_reduction,
+            'correction_magnitude': self.calculate_correction_magnitude(result)
+        }
+
+    def calculate_position_error(self, estimated_pose, ground_truth_pose):
+        """Calculate position error between estimate and ground truth"""
+        dx = estimated_pose.pose.position.x - ground_truth_pose.pose.position.x
+        dy = estimated_pose.pose.position.y - ground_truth_pose.pose.position.y
+        dz = estimated_pose.pose.position.z - ground_truth_pose.pose.position.z
+
+        return np.sqrt(dx*dx + dy*dy + dz*dz)
+
+    def calculate_orientation_error(self, estimated_pose, ground_truth_pose):
+        """Calculate orientation error between estimate and ground truth"""
+        # Convert quaternions to rotation matrices and compare
+        est_rot = self.quaternion_to_rotation_matrix(estimated_pose.pose.orientation)
+        gt_rot = self.quaternion_to_rotation_matrix(ground_truth_pose.pose.orientation)
+
+        # Calculate rotation error using axis-angle representation
+        rotation_error = np.arccos(
+            np.clip((np.trace(est_rot.T @ gt_rot) - 1) / 2, -1, 1)
+        )
+
+        return rotation_error
+
+    def quaternion_to_rotation_matrix(self, quat):
+        """Convert quaternion to rotation matrix"""
+        # Convert quaternion to rotation matrix
+        w, x, y, z = quat.w, quat.x, quat.y, quat.z
+
+        rotation_matrix = np.array([
+            [1 - 2*y*y - 2*z*z, 2*x*y - 2*z*w, 2*x*z + 2*y*w],
+            [2*x*y + 2*z*w, 1 - 2*x*x - 2*z*z, 2*y*z - 2*x*w],
+            [2*x*z - 2*y*w, 2*y*z + 2*x*w, 1 - 2*x*x - 2*y*y]
+        ])
+
+        return rotation_matrix
+```
+
+## Troubleshooting and Debugging
+
+### Common Integration Issues
+```python
+# Example: Debugging tools for VSLAM-Nav2 integration
+class VSLAMNav2DebuggingTools:
+    def __init__(self):
+        self.debug_visualization = True
+        self.performance_monitoring = True
+        self.data_consistency_checking = True
+
+    def visualize_integration_state(self):
+        """Visualize the current state of VSLAM-Nav2 integration"""
+        if not self.debug_visualization:
+            return
+
+        # Create visualization markers for RViz
+        marker_array = MarkerArray()
+
+        # VSLAM pose estimate
+        vslam_marker = self.create_pose_marker(
+            self.vslam_pose, 'vslam_estimate', (0, 1, 0)  # Green
+        )
+        marker_array.markers.append(vslam_marker)
+
+        # Nav2 pose estimate
+        nav2_marker = self.create_pose_marker(
+            self.nav2_pose, 'nav2_estimate', (0, 0, 1)  # Blue
+        )
+        marker_array.markers.append(nav2_marker)
+
+        # Fused pose estimate
+        fused_marker = self.create_pose_marker(
+            self.fused_pose, 'fused_estimate', (1, 0, 0)  # Red
+        )
+        marker_array.markers.append(fused_marker)
+
+        # Publish visualization
+        self.visualization_pub.publish(marker_array)
+
+    def monitor_integration_performance(self):
+        """Monitor performance of VSLAM-Nav2 integration"""
+        if not self.performance_monitoring:
+            return
+
+        # Track processing times
+        vslam_time = self.measure_vslam_processing_time()
+        nav2_time = self.measure_nav2_processing_time()
+        fusion_time = self.measure_fusion_processing_time()
+
+        # Calculate total integration time
+        total_time = vslam_time + nav2_time + fusion_time
+
+        # Check timing constraints
+        max_allowed_time = 1000.0 / self.integration_frequency  # ms
+        if total_time > max_allowed_time:
+            self.get_logger().warn(
+                f"Integration cycle exceeded time budget: {total_time:.1f}ms > {max_allowed_time:.1f}ms"
+            )
+
+        # Monitor accuracy
+        accuracy_metrics = self.calculate_integration_accuracy()
+        if accuracy_metrics['error'] > self.accuracy_threshold:
+            self.get_logger().warn(f"Integration accuracy below threshold: {accuracy_metrics['error']}")
+
+        return {
+            'vslam_time': vslam_time,
+            'nav2_time': nav2_time,
+            'fusion_time': fusion_time,
+            'total_time': total_time,
+            'accuracy': accuracy_metrics,
+            'performance_ratio': total_time / max_allowed_time
+        }
+
+    def check_data_consistency(self):
+        """Check consistency of data between VSLAM and Nav2"""
+        if not self.data_consistency_checking:
+            return True
+
+        # Check TF tree consistency
+        tf_consistency = self.check_tf_consistency()
+
+        # Check timestamp alignment
+        timestamp_alignment = self.check_timestamp_alignment()
+
+        # Check coordinate frame alignment
+        frame_alignment = self.check_frame_alignment()
+
+        # Overall consistency check
+        overall_consistent = all([tf_consistency, timestamp_alignment, frame_alignment])
+
+        if not overall_consistent:
+            self.get_logger().error("Data consistency check failed!")
+            if not tf_consistency:
+                self.get_logger().error("- TF tree inconsistency detected")
+            if not timestamp_alignment:
+                self.get_logger().error("- Timestamp misalignment detected")
+            if not frame_alignment:
+                self.get_logger().error("- Coordinate frame misalignment detected")
+
+        return overall_consistent
+```
+
+## Summary
+
+The integration of VSLAM and Nav2 creates a powerful navigation system for humanoid robots, combining the spatial awareness of visual SLAM with the proven navigation capabilities of Nav2. Key aspects of successful integration include proper sensor fusion, map enhancement, loop closure integration, and performance optimization. The use of Isaac ROS provides GPU acceleration for real-time performance while maintaining the accuracy required for safe and effective navigation. Proper configuration, testing, and monitoring ensure the integrated system performs reliably in complex human environments.

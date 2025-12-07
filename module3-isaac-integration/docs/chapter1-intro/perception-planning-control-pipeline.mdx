@@ -1,0 +1,196 @@
+---
+title: "Perception-Planning-Control Pipeline"
+description: "Understanding the fundamental pipeline that connects sensing, decision-making, and actuation in humanoid robots"
+sidebar_position: 3
+---
+
+# Perception-Planning-Control Pipeline
+
+## Introduction
+
+The perception-planning-control (PPC) pipeline is the fundamental architecture that enables humanoid robots to interact with their environment. This pipeline connects sensing capabilities (perception), decision-making processes (planning), and physical actions (control) in a cohesive system.
+
+## Overview of the Pipeline
+
+The PPC pipeline operates in a continuous loop:
+
+1. **Perception**: Sense the environment and internal state
+2. **Planning**: Determine appropriate actions based on goals and constraints
+3. **Control**: Execute actions through actuators and motors
+4. **Feedback**: Use sensor data to update the model and refine actions
+
+## Perception Layer
+
+### Sensory Inputs
+- **Vision**: Cameras for visual scene understanding
+- **Depth**: Depth sensors for 3D scene reconstruction
+- **Inertial**: IMUs for orientation and acceleration
+- **Tactile**: Force/torque sensors for manipulation
+- **Proprioceptive**: Joint encoders for body position awareness
+
+### Processing
+- Object detection and recognition
+- Scene segmentation and understanding
+- State estimation (position, velocity, orientation)
+- Environmental mapping
+
+### Isaac ROS Integration
+- GPU-accelerated computer vision
+- Visual SLAM for localization
+- Deep learning inference for object recognition
+
+## Planning Layer
+
+### High-Level Planning
+- Task planning for complex behaviors
+- Path planning for navigation
+- Motion planning for manipulation
+- Trajectory generation for smooth movements
+
+### Mid-Level Planning
+- Local path refinement
+- Obstacle avoidance strategies
+- Balance planning for bipedal locomotion
+- Resource allocation and scheduling
+
+### Isaac Applications
+- Navigation with Nav2
+- Manipulation planning
+- Behavior trees for task orchestration
+- Reinforcement learning for adaptive planning
+
+## Control Layer
+
+### High-Frequency Control
+- Joint position/velocity control
+- Balance control for bipedal robots
+- Compliance control for safe interaction
+- Force control for manipulation
+
+### Control Architectures
+- Hierarchical control for complex behaviors
+- Model Predictive Control (MPC) for dynamic systems
+- Feedback control for stability
+- Feedforward control for smooth motion
+
+## Humanoid-Specific Considerations
+
+### Balance and Locomotion
+- Center of Mass (CoM) control
+- Zero Moment Point (ZMP) planning
+- Walking pattern generation
+- Disturbance rejection
+
+### Multi-Modal Integration
+- Sensor fusion for robust state estimation
+- Cross-modal perception (visual-tactile integration)
+- Attention mechanisms for processing prioritization
+
+### Real-Time Constraints
+- Control loops at 100Hz+ for stability
+- Perception pipelines optimized for real-time performance
+- Predictive control to handle sensor delays
+
+## Pipeline Integration Example
+
+```python
+# Example: Perception-Planning-Control pipeline for humanoid robot
+import numpy as np
+from geometry_msgs.msg import Pose, Twist
+from sensor_msgs.msg import JointState
+
+class HumanoidPPCPipeline:
+    def __init__(self):
+        # Perception components
+        self.vision_system = VisionSystem()
+        self.imu_system = IMUProcessor()
+        self.kinematic_model = KinematicModel()
+
+        # Planning components
+        self.trajectory_planner = TrajectoryPlanner()
+        self.balance_planner = BalancePlanner()
+
+        # Control components
+        self.motion_controller = MotionController()
+        self.balance_controller = BalanceController()
+
+        # State variables
+        self.robot_state = RobotState()
+        self.goal = GoalState()
+
+    def perception_step(self, sensor_data):
+        """Process sensor data to update world and robot state"""
+        # Process visual input
+        objects = self.vision_system.process(sensor_data.camera)
+
+        # Process IMU data for orientation
+        orientation = self.imu_system.process(sensor_data.imu)
+
+        # Update kinematic state
+        self.robot_state.update_from_sensors(sensor_data)
+
+        return self.robot_state, objects
+
+    def planning_step(self, robot_state, objects, goal):
+        """Plan appropriate actions based on current state and goal"""
+        # Plan trajectory to goal
+        trajectory = self.trajectory_planner.plan(
+            robot_state, goal, objects
+        )
+
+        # Plan balance adjustments
+        balance_plan = self.balance_planner.compute(
+            robot_state, trajectory
+        )
+
+        return trajectory, balance_plan
+
+    def control_step(self, trajectory, balance_plan, robot_state):
+        """Execute planned actions through robot controllers"""
+        # Generate motion commands
+        motion_cmd = self.motion_controller.compute(
+            trajectory, robot_state
+        )
+
+        # Generate balance commands
+        balance_cmd = self.balance_controller.compute(
+            balance_plan, robot_state
+        )
+
+        # Combine and send commands to robot
+        combined_cmd = self.merge_commands(motion_cmd, balance_cmd)
+        return combined_cmd
+
+    def run_pipeline(self, sensor_data, goal):
+        """Execute one cycle of the PPC pipeline"""
+        # Perception
+        robot_state, objects = self.perception_step(sensor_data)
+
+        # Planning
+        trajectory, balance_plan = self.planning_step(
+            robot_state, objects, goal
+        )
+
+        # Control
+        commands = self.control_step(
+            trajectory, balance_plan, robot_state
+        )
+
+        return commands
+```
+
+## Performance Considerations
+
+### Latency Requirements
+- Perception: <50ms for reactive behaviors
+- Planning: <100ms for dynamic environments
+- Control: <10ms for stability
+
+### Throughput Requirements
+- High-bandwidth sensor processing
+- Real-time optimization for planning
+- High-frequency actuator commands
+
+## Summary
+
+The perception-planning-control pipeline is the backbone of intelligent humanoid robot behavior. Each layer must be carefully designed and optimized to work together effectively, with special attention to real-time performance and robustness for bipedal locomotion and human interaction scenarios.
