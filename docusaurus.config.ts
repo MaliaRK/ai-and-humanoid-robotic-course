@@ -22,8 +22,8 @@ const config: Config = {
 
   // GitHub pages deployment config.
   // If you aren't using GitHub pages, you don't need these.
-  organizationName: 'facebook', // Usually your GitHub org/user name.
-  projectName: 'docusaurus', // Usually your repo name.
+  organizationName: 'MaliaRK', // Usually your GitHub org/user name.
+  projectName: 'ai-and-humanoid-robotic-course', // Usually your repo name.
 
   onBrokenLinks: 'throw',
 
@@ -107,9 +107,8 @@ const config: Config = {
           label: 'Module 4',
           position: 'left',
         },
-        {to: '/blog', label: 'Blog', position: 'left'},
         {
-          href: 'https://github.com/facebook/docusaurus',
+          href: 'https://github.com/MaliaRK/ai-and-humanoid-robotic-course',
           label: 'GitHub',
           position: 'right',
         },
@@ -160,12 +159,8 @@ const config: Config = {
           title: 'More',
           items: [
             {
-              label: 'Blog',
-              to: '/blog',
-            },
-            {
               label: 'GitHub',
-              href: 'https://github.com/facebook/docusaurus',
+              href: 'https://github.com/MaliaRK/ai-and-humanoid-robotic-course',
             },
           ],
         },
@@ -173,8 +168,8 @@ const config: Config = {
       copyright: `Copyright © ${new Date().getFullYear()} My Project, Inc. Built with Docusaurus.`,
     },
     prism: {
-      theme: prismThemes.github,
-      darkTheme: prismThemes.dracula,
+      theme: prismThemes.okaidia,
+      darkTheme: prismThemes.vsDark,
     },
   } satisfies Preset.ThemeConfig,
 };
