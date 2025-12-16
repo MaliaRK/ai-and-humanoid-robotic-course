@@ -1,0 +1,157 @@
+openapi: 3.0.0
+info:
+  title: RAG Chatbot Integration API
+  description: API contracts for the Docusaurus-FastAPI chatbot integration
+  version: 1.0.0
+servers:
+  - url: http://localhost:8000
+    description: Local development server
+
+paths:
+  /api/v1/rag/query:
+    post:
+      summary: Submit a query to the RAG system
+      description: Send a user query to the backend RAG system with optional selected text context
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryRequest'
+      responses:
+        '200':
+          description: Successful response from the RAG system
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResponse'
+        '400':
+          description: Bad request - invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    QueryRequest:
+      type: object
+      required:
+        - query
+      properties:
+        query:
+          type: string
+          description: The user's question
+          example: "What is the main concept of this chapter?"
+        selectedText:
+          type: string
+          description: Optional selected text to provide context
+          example: "The main concept of this chapter is the integration of AI systems with robotic platforms..."
+        scope:
+          type: string
+          description: Optional scope for the query
+          enum: [course, modules, readings, assignments, general]
+          example: "course"
+        conversationId:
+          type: string
+          description: Optional conversation ID to maintain context
+          example: "conv_12345"
+
+    QueryResponse:
+      type: object
+      required:
+        - id
+        - query
+        - response
+        - citations
+        - confidence
+        - retrievedChunksCount
+        - processingTimeMs
+        - conversationId
+      properties:
+        id:
+          type: string
+          description: Unique response ID
+          example: "resp_67890"
+        query:
+          type: string
+          description: The original query
+          example: "What is the main concept of this chapter?"
+        response:
+          type: string
+          description: The AI-generated response
+          example: "The main concept of this chapter is the integration of AI systems with robotic platforms..."
+        citations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Citation'
+          description: List of citations for the response
+        confidence:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          description: Confidence score of the response
+          example: 0.85
+        retrievedChunksCount:
+          type: integer
+          description: Number of chunks retrieved from the knowledge base
+          example: 5
+        processingTimeMs:
+          type: integer
+          description: Time taken to process the query in milliseconds
+          example: 1245
+        conversationId:
+          type: string
+          description: Conversation ID for maintaining context
+          example: "conv_12345"
+
+    Citation:
+      type: object
+      required:
+        - url
+        - module
+        - chunkId
+      properties:
+        url:
+          type: string
+          description: URL to the source document
+          example: "https://ai-and-humanoid-robotics-course.vercel.app/docs/introduction"
+        module:
+          type: string
+          description: Module name where the citation is from
+          example: "Introduction to AI Robotics"
+        chunkId:
+          type: integer
+          description: Position of the chunk in the document
+          example: 1
+        textPreview:
+          type: string
+          description: Preview of the cited text
+          example: "The integration of AI systems with robotic platforms enables autonomous decision making..."
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+        - code
+      properties:
+        error:
+          type: string
+          description: Error type
+          example: "INVALID_QUERY"
+        message:
+          type: string
+          description: Human-readable error message
+          example: "Query text is required and cannot be empty"
+        code:
+          type: string
+          description: Error code
+          example: "BAD_REQUEST"

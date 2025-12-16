@@ -213,6 +213,10 @@ See `.specify/memory/constitution.md` for code quality, testing, performance, se
 - Python 3.x + ROS2, Isaac Sim, NVIDIA Whisper, LLMs, Docusaurus (004-vla-vision-language-action)
 - Python 3.10 (for ROS 2 integration with Gazebo/Unity), C# (for Unity), XML (for SDF/URDF) + ROS 2 Humble, Gazebo Fortress/Ignition, Unity LTS, gazebo_ros_pkgs, Unity Robotics Hub (005-digital-twin)
 - Python 3.10, C++ (for Isaac ROS GEMs), USD (Universal Scene Description), Isaac Sim 4.0+, Isaac ROS, Omniverse Kit, Nav2 (004-isaac-integration)
+- Python 3.10+ (as specified in feature constraints for compatibility with ROS 2 integration) + OpenAI Agent SDK, FastAPI, Qdrant client library, Neon Postgres client, Google Generative AI (for Gemini), Pydantic, SQLAlchemy (001-agent-rag-backend)
+- Qdrant vector database (for content retrieval), Neon Serverless Postgres (for conversation logs and query history) (001-agent-rag-backend)
+- JavaScript (ES2020+), Python 3.10 (for backend compatibility with ROS 2 integration) + React (Docusaurus), FastAPI, ChatKit SDKs, HTTP/JSON for communication (009-rag-chatbot-integration)
+- N/A (client-side only, no persistent storage) (009-rag-chatbot-integration)
 
 ## Recent Changes
 - 004-vla-vision-language-action: Added Python 3.x + ROS2, Isaac Sim, NVIDIA Whisper, LLMs, Docusaurus
