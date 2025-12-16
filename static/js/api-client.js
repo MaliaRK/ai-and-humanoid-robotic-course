@@ -3,7 +3,7 @@
  */
 
 class RAGApiClient {
-  constructor(baseURL = 'http://localhost:8000') {
+  constructor(baseURL = 'http://localhost:8085') {
     this.baseURL = baseURL;
   }
 

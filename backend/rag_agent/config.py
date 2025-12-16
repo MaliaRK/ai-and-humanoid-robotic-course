@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Application Configuration
-QDRANT_COLLECTION_NAME = os.getenv("QDRANT_COLLECTION_NAME", "rag_content")
+QDRANT_COLLECTION_NAME = os.getenv("QDRANT_COLLECTION_NAME", "ai_book_embedding")
 AGENT_MODEL = os.getenv("AGENT_MODEL", "gpt-4")
 AGENT_TEMPERATURE = float(os.getenv("AGENT_TEMPERATURE", "0.7"))
 MAX_RETRIEVAL_CHUNKS = int(os.getenv("MAX_RETRIEVAL_CHUNKS", "5"))

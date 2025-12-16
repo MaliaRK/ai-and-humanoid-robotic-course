@@ -65,9 +65,9 @@ def search_similar_chunks(
         query_embedding = embed_query(query)
 
         # Perform semantic search in Qdrant
-        search_results = qdrant_client.search(
+        search_results = qdrant_client.query_points(
             collection_name=collection_name,
-            query_vector=query_embedding,
+            query=query_embedding,
             limit=top_k,
             score_threshold=similarity_threshold,
             with_payload=True
@@ -75,13 +75,13 @@ def search_similar_chunks(
 
         # Format results for easier consumption
         formatted_results = []
-        for result in search_results:
+        for result in search_results.points:
             formatted_results.append({
                 "id": result.id,
-                "content": result.payload.get("content", ""),
-                "source_url": result.payload.get("source_url", ""),
-                "module_name": result.payload.get("module_name", ""),
-                "chunk_id": result.payload.get("chunk_id", 0),
+                "content": result.payload.get("content", "") if result.payload else "",
+                "source_url": result.payload.get("source_url", "") if result.payload else "",
+                "module_name": result.payload.get("module_name", "") if result.payload else "",
+                "chunk_id": result.payload.get("chunk_id", 0) if result.payload else 0,
                 "similarity_score": result.score,
                 "metadata": result.payload  # Include all metadata
             })
@@ -132,7 +132,7 @@ def search_chunks_by_metadata(
         )
 
         # Perform search with metadata filters
-        search_results = qdrant_client.search(
+        search_results = qdrant_client.query_points(
             collection_name=collection_name,
             query_filter=search_filter,
             limit=top_k,
@@ -141,13 +141,13 @@ def search_chunks_by_metadata(
 
         # Format results
         formatted_results = []
-        for result in search_results:
+        for result in search_results.points:
             formatted_results.append({
                 "id": result.id,
-                "content": result.payload.get("content", ""),
-                "source_url": result.payload.get("source_url", ""),
-                "module_name": result.payload.get("module_name", ""),
-                "chunk_id": result.payload.get("chunk_id", 0),
+                "content": result.payload.get("content", "") if result.payload else "",
+                "source_url": result.payload.get("source_url", "") if result.payload else "",
+                "module_name": result.payload.get("module_name", "") if result.payload else "",
+                "chunk_id": result.payload.get("chunk_id", 0) if result.payload else 0,
                 "similarity_score": result.score,
                 "metadata": result.payload
             })
