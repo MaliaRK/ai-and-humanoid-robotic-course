@@ -4,6 +4,7 @@
 
 class RAGApiClient {
   constructor(baseURL = 'https://ai-book-production.up.railway.app/') {
+
     this.baseURL = baseURL;
   }
 

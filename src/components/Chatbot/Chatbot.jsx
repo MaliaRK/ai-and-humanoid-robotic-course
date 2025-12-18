@@ -50,7 +50,9 @@ const Chatbot = () => {
       };
 
       // Call the RAG backend API - use full URL to backend server
-      const BACKEND_URL = 'https://ai-book-production.up.railway.app/';
+
+      
+      const BACKEND_URL = process.env.NEXT_PUBLIC_API_BASE_URL
       const response = await fetch(`${BACKEND_URL}/api/v1/rag/query`, {
         method: 'POST',
         headers: {
