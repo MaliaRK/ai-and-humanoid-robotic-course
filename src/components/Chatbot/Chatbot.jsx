@@ -51,8 +51,7 @@ const Chatbot = () => {
 
       // Call the RAG backend API - use full URL to backend server
 
-      
-      const BACKEND_URL = 'https://ai-book-production.up.railway.app/'
+      const BACKEND_URL = 'https://ai-book-production.up.railway.app'; // Removed trailing slash
       const response = await fetch(`${BACKEND_URL}/api/v1/rag/query`, {
         method: 'POST',
         headers: {
@@ -62,8 +61,16 @@ const Chatbot = () => {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || `Backend API error: ${response.status}`);
+        // Try to get error details, but handle case where response isn't JSON
+        let errorData;
+        try {
+          errorData = await response.json();
+        } catch (parseError) {
+          // If response is not JSON, get the text
+          const errorText = await response.text().catch(() => 'Unknown error');
+          throw new Error(`Backend API error: ${response.status} - ${errorText}`);
+        }
+        throw new Error(errorData.message || `Backend API error: ${response.status} - ${JSON.stringify(errorData)}`);
       }
 
       const data = await response.json();
