@@ -12,3 +12,5 @@ slowapi==0.1.9
 cohere==4.34
 beautifulsoup4==4.14.3
 requests==2.32.5
+sentence-transformers
+torch

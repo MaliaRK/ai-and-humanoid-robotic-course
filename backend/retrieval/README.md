@@ -5,7 +5,7 @@ This module implements semantic search functionality to retrieve contextually re
 ## Overview
 
 The vector retrieval system provides:
-- Semantic search capabilities using Cohere embeddings
+- Semantic search capabilities using Gemini embeddings
 - Integration with Qdrant vector database
 - Metadata preservation and validation
 - Performance measurement and optimization
@@ -23,7 +23,7 @@ The vector retrieval system provides:
 ## Requirements
 
 - Python 3.10+
-- Cohere API key
+- Google Gemini API key
 - Qdrant Cloud account and API key
 - Required Python packages (see requirements.txt)
 
@@ -36,7 +36,7 @@ pip install -r requirements.txt
 
 2. Set up environment variables in `.env`:
 ```
-COHERE_API_KEY=your_cohere_api_key
+GEMINI_API_KEY=your_gemini_api_key
 QDRANT_URL=your_qdrant_cloud_url
 QDRANT_API_KEY=your_qdrant_api_key
 WEBSITE_URL=https://ai-and-humanoid-robotic-course.vercel.app/
@@ -66,15 +66,15 @@ Available options:
 ### Programmatic Usage
 
 ```python
-from retrieval import initialize_cohere_client, initialize_qdrant_client, retrieve_chunks_for_query_with_retry
+from retrieval import initialize_gemini_client, initialize_qdrant_client, retrieve_chunks_for_query_with_retry
 
 # Initialize clients
-cohere_client = initialize_cohere_client()
+gemini_client = initialize_gemini_client()
 qdrant_client = initialize_qdrant_client()
 
 # Perform retrieval
 results = retrieve_chunks_for_query_with_retry(
-    cohere_client=cohere_client,
+    gemini_client=gemini_client,
     qdrant_client=qdrant_client,
     query="What is artificial intelligence?",
     top_k=5,
@@ -90,12 +90,12 @@ for result in results:
 
 ## API Functions
 
-### `retrieve_chunks_for_query_with_retry(cohere_client, qdrant_client, query, top_k=5, similarity_threshold=0.3, collection_name="rag_embedding", max_retries=3)`
+### `retrieve_chunks_for_query_with_retry(gemini_client, qdrant_client, query, top_k=5, similarity_threshold=0.3, collection_name="rag_embedding", max_retries=3)`
 
 Retrieve semantically similar content chunks for a given query with retry logic.
 
 **Parameters:**
-- `cohere_client`: Initialized Cohere client
+- `gemini_client`: Initialized Gemini client
 - `qdrant_client`: Initialized Qdrant client
 - `query`: The search query string
 - `top_k`: Number of top results to retrieve (default: 5)
@@ -125,7 +125,7 @@ The system uses several configuration constants that can be modified in the sour
 - `MAX_DEPTH`: Maximum depth to crawl for URL discovery (default: 2)
 - `REQUEST_TIMEOUT`: Timeout for HTTP requests in seconds (default: 10)
 - `MAX_RETRIES`: Maximum number of retries for failed requests (default: 3)
-- `EMBEDDING_BATCH_SIZE`: Number of chunks to embed at once (default: 10)
+- `EMBEDDING_BATCH_SIZE`: Number of chunks to embed at once (default: 5, reduced for Gemini rate limits)
 
 ## Testing
 

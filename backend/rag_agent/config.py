@@ -22,7 +22,6 @@ def validate_environment() -> tuple[bool, list[str]]:
         tuple: (is_valid, list of missing environment variables)
     """
     required_vars = [
-        "OPENAI_API_KEY",
         "GEMINI_API_KEY",
         "QDRANT_URL",
         "QDRANT_API_KEY",

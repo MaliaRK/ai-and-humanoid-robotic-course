@@ -3,7 +3,8 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models
 import logging
 import os
-import cohere
+import time
+from sentence_transformers import SentenceTransformer
 from rag_agent.config import QDRANT_COLLECTION_NAME, RETRIEVAL_TOP_K, SIMILARITY_THRESHOLD
 
 # Set up logging
@@ -12,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def embed_query(query: str) -> List[float]:
     """
-    Generate embedding for a query using Cohere's embedding model.
+    Generate embedding for a query using local sentence transformer model.
 
     Args:
         query: The query text to embed
@@ -20,24 +21,16 @@ def embed_query(query: str) -> List[float]:
     Returns:
         List of floats representing the embedding vector
     """
-    api_key = os.getenv("COHERE_API_KEY")
-    if not api_key:
-        raise ValueError("COHERE_API_KEY environment variable is required")
-
-    client = cohere.Client(api_key)
-
     try:
-        response = client.embed(
-            texts=[query],
-            model="embed-english-v3.0",  # Using Cohere's embedding model that matches ingestion
-            input_type="search_query"  # Optimize for search queries
-        )
+        # Initialize the sentence transformer model
+        model = SentenceTransformer('all-MiniLM-L6-v2')
 
-        embedding = response.embeddings[0]  # Get the first (and only) embedding
+        # Generate embedding using local model
+        embedding = model.encode([query])[0].tolist()
         logger.info(f"Generated embedding for query: {query[:50]}...")
         return embedding
     except Exception as e:
-        logger.error(f"Error generating embedding: {e}")
+        logger.error(f"Error generating embedding for query: {e}")
         raise
 
 def search_similar_chunks(
@@ -78,10 +71,10 @@ def search_similar_chunks(
         for result in search_results.points:
             formatted_results.append({
                 "id": result.id,
-                "content": result.payload.get("content", "") if result.payload else "",
-                "source_url": result.payload.get("source_url", "") if result.payload else "",
+                "content": result.payload.get("content", result.payload.get("text", "")) if result.payload else "",
+                "source_url": result.payload.get("source_url", result.payload.get("url", "")) if result.payload else "",
                 "module_name": result.payload.get("module_name", "") if result.payload else "",
-                "chunk_id": result.payload.get("chunk_id", 0) if result.payload else 0,
+                "chunk_id": result.payload.get("chunk_id", result.payload.get("chunk_index", 0)) if result.payload else 0,
                 "similarity_score": result.score,
                 "metadata": result.payload  # Include all metadata
             })
@@ -144,10 +137,10 @@ def search_chunks_by_metadata(
         for result in search_results.points:
             formatted_results.append({
                 "id": result.id,
-                "content": result.payload.get("content", "") if result.payload else "",
-                "source_url": result.payload.get("source_url", "") if result.payload else "",
+                "content": result.payload.get("content", result.payload.get("text", "")) if result.payload else "",
+                "source_url": result.payload.get("source_url", result.payload.get("url", "")) if result.payload else "",
                 "module_name": result.payload.get("module_name", "") if result.payload else "",
-                "chunk_id": result.payload.get("chunk_id", 0) if result.payload else 0,
+                "chunk_id": result.payload.get("chunk_id", result.payload.get("chunk_index", 0)) if result.payload else 0,
                 "similarity_score": result.score,
                 "metadata": result.payload
             })

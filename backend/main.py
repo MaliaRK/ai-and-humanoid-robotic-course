@@ -9,7 +9,6 @@ and stores them with metadata in Qdrant Cloud vector database.
 import os
 import requests
 from bs4 import BeautifulSoup
-import cohere
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from dotenv import load_dotenv
@@ -18,6 +17,7 @@ import logging
 from typing import List, Dict, Tuple, Optional
 import re
 from urllib.parse import urljoin, urlparse
+from sentence_transformers import SentenceTransformer
 
 
 def setup_logging():
@@ -41,8 +41,13 @@ MAX_RETRIES = 3  # Maximum number of retries for failed requests
 EMBEDDING_BATCH_SIZE = 10  # Number of chunks to embed at once to stay within API limits
 
 
-# Load environment variables
-load_dotenv()
+# Load environment variables from the project root
+import sys
+from pathlib import Path
+# Add the project root to the path so we can load .env from there
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+load_dotenv(dotenv_path=project_root / ".env")
 
 
 def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
@@ -117,9 +122,9 @@ def track_embedding_usage(text_chunks: List[str]) -> Dict[str, int]:
     }
 
 
-def embed(cohere_client, text_chunks: List[str]) -> List[List[float]]:
+def embed(model, text_chunks: List[str]) -> List[List[float]]:
     """
-    Generate semantic embeddings for text chunks using Cohere
+    Generate semantic embeddings for text chunks using local sentence transformer model
     """
     if not text_chunks:
         return []
@@ -128,59 +133,29 @@ def embed(cohere_client, text_chunks: List[str]) -> List[List[float]]:
     usage_stats = track_embedding_usage(text_chunks)
     print(f"Embedding usage stats - Chars: {usage_stats['total_chars']}, Chunks: {usage_stats['total_chunks']}, Estimated tokens: {usage_stats['estimated_tokens']}")
 
-    # Process in batches to stay within API limits
+    # Process all chunks at once for better efficiency with local model
     all_embeddings = []
 
-    for i in range(0, len(text_chunks), EMBEDDING_BATCH_SIZE):
-        batch = text_chunks[i:i + EMBEDDING_BATCH_SIZE]
+    try:
+        # Encode all texts at once for better performance
+        embeddings = model.encode(text_chunks)
 
-        retry_count = 0
-        while retry_count < MAX_RETRIES:
+        # Convert to list of lists
+        for i, embedding in enumerate(embeddings):
+            all_embeddings.append(embedding.tolist())
+            print(f"Generated embedding with dimension: {len(embedding)} for chunk {i+1}/{len(text_chunks)}")
+
+    except Exception as e:
+        print(f"Error generating embeddings: {str(e)}")
+        # If there's an error, try processing one by one
+        for i, text in enumerate(text_chunks):
             try:
-                response = cohere_client.embed(
-                    texts=batch,
-                    model="embed-english-v3.0",  # Using Cohere's latest embedding model
-                    input_type="search_document"  # Optimize for search documents
-                )
-
-                # Extract embeddings from the response
-                # The response.embeddings should be a list of lists (list of embedding vectors)
-                batch_embeddings = response.embeddings
-                all_embeddings.extend(batch_embeddings)
-
-                # Log the embedding dimensions for debugging
-                if batch_embeddings and len(batch_embeddings) > 0:
-                    print(f"Generated embeddings with dimension: {len(batch_embeddings[0])} for batch of {len(batch)} chunks")
-
-                break  # Success, break out of retry loop
-
-            except cohere.CohereAPIError as e:
-                if "rate_limit" in str(e).lower() or e.status_code == 429:
-                    print(f"Rate limit hit, waiting before retry {retry_count + 1}/{MAX_RETRIES}")
-                    handle_rate_limit_error()
-                    retry_count += 1
-                    continue
-                elif "quota" in str(e).lower() or "credit" in str(e).lower():
-                    print(f"API quota exceeded: {str(e)}")
-                    # Graceful degradation: return partial results
-                    # Add empty embeddings for remaining batches
-                    remaining_batches = (len(text_chunks) - i) // EMBEDDING_BATCH_SIZE
-                    if (len(text_chunks) - i) % EMBEDDING_BATCH_SIZE:
-                        remaining_batches += 1
-                    all_embeddings.extend([[] for _ in range(remaining_batches * EMBEDDING_BATCH_SIZE)])
-                    break  # Stop processing, quota exceeded
-                else:
-                    print(f"Cohere API error: {str(e)}")
-                    # Don't retry for other API errors
-                    break
+                embedding = model.encode([text])[0].tolist()
+                all_embeddings.append(embedding)
+                print(f"Generated embedding with dimension: {len(embedding)} for chunk {i+1}/{len(text_chunks)}")
             except Exception as e:
-                print(f"Error generating embeddings for batch: {str(e)}")
-                retry_count += 1
-                if retry_count >= MAX_RETRIES:
-                    # If we've exhausted retries, add empty embeddings for this batch
-                    all_embeddings.extend([[] for _ in range(len(batch))])
-                else:
-                    time.sleep(2 ** retry_count)  # Exponential backoff
+                print(f"Error generating embedding for chunk {i+1}: {str(e)}")
+                all_embeddings.append([])  # Add empty embedding on failure
 
     return all_embeddings
 
@@ -193,7 +168,7 @@ def main(url: str = None, max_depth: int = MAX_DEPTH, dry_run: bool = False):
     logger.info("Starting website ingestion pipeline...")
 
     # Initialize clients and configuration
-    cohere_client = initialize_cohere_client()
+    sentence_transformer = initialize_sentence_transformer()
     qdrant_client = initialize_qdrant_client()
 
     # Get base URL from parameter, environment or use default
@@ -215,8 +190,8 @@ def main(url: str = None, max_depth: int = MAX_DEPTH, dry_run: bool = False):
     sample_text = "This is a sample text to test embedding generation functionality. It should generate a meaningful embedding vector."
     sample_chunks = chunk_text(sample_text)
     if sample_chunks:
-        cohere_client_test = initialize_cohere_client()
-        sample_embeddings = embed(cohere_client_test, sample_chunks)
+        sentence_transformer_test = initialize_sentence_transformer()
+        sample_embeddings = embed(sentence_transformer_test, sample_chunks)
         if sample_embeddings and len(sample_embeddings) > 0 and len(sample_embeddings[0]) > 0:
             logger.info("Embedding generation test passed - embeddings generated successfully")
         else:
@@ -237,7 +212,7 @@ def main(url: str = None, max_depth: int = MAX_DEPTH, dry_run: bool = False):
 
     # Test vector storage with complete metadata preservation - T031
     test_text = "This is a test chunk to verify metadata preservation in Qdrant storage."
-    test_embeddings = embed(cohere_client, [test_text])
+    test_embeddings = embed(sentence_transformer, [test_text])
     test_metadata = {
         "source_url": "https://test-url.com",
         "module_name": "test_module",
@@ -295,7 +270,7 @@ def main(url: str = None, max_depth: int = MAX_DEPTH, dry_run: bool = False):
                 # Generate embeddings for each chunk
                 for j, chunk in enumerate(chunks):
                     # Generate embedding
-                    chunk_embeddings = embed(cohere_client, [chunk])
+                    chunk_embeddings = embed(sentence_transformer, [chunk])
 
                     # Check if embeddings were generated successfully
                     if chunk_embeddings and len(chunk_embeddings) > 0:
@@ -337,7 +312,7 @@ def main(url: str = None, max_depth: int = MAX_DEPTH, dry_run: bool = False):
     try:
         # Create a test query embedding
         query_text = "artificial intelligence and robotics"
-        query_embeddings = embed(cohere_client, [query_text])
+        query_embeddings = embed(sentence_transformer, [query_text])
 
         if query_embeddings and len(query_embeddings) > 0:
             query_embedding = query_embeddings[0]
@@ -366,16 +341,13 @@ def main(url: str = None, max_depth: int = MAX_DEPTH, dry_run: bool = False):
     logger.info(f"Pipeline completed in {execution_time:.2f} seconds. Processed {processed_count} URLs, stored {stored_chunks} chunks.")
 
 
-def initialize_cohere_client():
-    """Initialize Cohere client with API key from environment variables"""
-    api_key = os.getenv("COHERE_API_KEY")
-    if not api_key:
-        raise ValueError("COHERE_API_KEY environment variable is required")
-
+def initialize_sentence_transformer():
+    """Initialize sentence transformer model for embeddings"""
     try:
-        return cohere.Client(api_key)
+        model = SentenceTransformer('all-MiniLM-L6-v2')
+        return model
     except Exception as e:
-        raise ConnectionError(f"Failed to initialize Cohere client: {str(e)}")
+        raise ConnectionError(f"Failed to initialize sentence transformer: {str(e)}")
 
 
 def initialize_qdrant_client():
@@ -610,7 +582,7 @@ def extract_module_name_from_url(url: str) -> str:
     return module_name
 
 
-def create_collection(qdrant_client, collection_name: str = "rag_embedding"):
+def create_collection(qdrant_client, collection_name: str = "ai_book_embedding"):
     """
     Create a Qdrant collection for storing embeddings
     """
@@ -624,13 +596,13 @@ def create_collection(qdrant_client, collection_name: str = "rag_embedding"):
             collection_names = [collection.name for collection in collections.collections]
 
             if collection_name not in collection_names:
-                # Create the collection with appropriate vector size for Cohere embeddings
-                # Using 1024 dimensions which is the default for Cohere's v3 English model
+                # Create the collection with appropriate vector size for sentence transformer embeddings
+                # Using 384 dimensions which is the default for all-MiniLM-L6-v2 model
                 qdrant_client.recreate_collection(
                     collection_name=collection_name,
-                    vectors_config=models.VectorParams(size=1024, distance=models.Distance.COSINE),
+                    vectors_config=models.VectorParams(size=384, distance=models.Distance.COSINE),
                 )
-                print(f"Collection '{collection_name}' created successfully with 1024-dimensional vectors.")
+                print(f"Collection '{collection_name}' created successfully with 384-dimensional vectors.")
             else:
                 print(f"Collection '{collection_name}' already exists.")
 

@@ -11,7 +11,7 @@ from typing import List, Tuple, Optional, Dict
 import numpy as np
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
-import cohere
+import google.generativeai as genai
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from dotenv import load_dotenv
@@ -28,16 +28,17 @@ REQUEST_TIMEOUT = 10  # Timeout for HTTP requests in seconds
 MAX_RETRIES = 3  # Maximum number of retries for failed requests
 EMBEDDING_BATCH_SIZE = 10  # Number of chunks to embed at once to stay within API limits
 
-def initialize_cohere_client():
-    """Initialize Cohere client with API key from environment variables"""
-    api_key = os.getenv("COHERE_API_KEY")
+def initialize_gemini_client():
+    """Initialize Gemini client with API key from environment variables"""
+    api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        raise ValueError("COHERE_API_KEY environment variable is required")
+        raise ValueError("GEMINI_API_KEY environment variable is required")
 
     try:
-        return cohere.Client(api_key)
+        genai.configure(api_key=api_key)
+        return "embedding-001"  # Return model name instead of embedding model object
     except Exception as e:
-        raise ConnectionError(f"Failed to initialize Cohere client: {str(e)}")
+        raise ConnectionError(f"Failed to initialize Gemini client: {str(e)}")
 
 
 def initialize_qdrant_client():
@@ -56,21 +57,21 @@ def initialize_qdrant_client():
 
 def load_env_variables():
     """Load and validate environment variables"""
-    required_vars = ["COHERE_API_KEY", "QDRANT_URL", "QDRANT_API_KEY"]
+    required_vars = ["GEMINI_API_KEY", "QDRANT_URL", "QDRANT_API_KEY"]
     missing_vars = [var for var in required_vars if not os.getenv(var)]
 
     if missing_vars:
         raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
 
     return {
-        "cohere_api_key": os.getenv("COHERE_API_KEY"),
+        "gemini_api_key": os.getenv("GEMINI_API_KEY"),
         "qdrant_url": os.getenv("QDRANT_URL"),
         "qdrant_api_key": os.getenv("QDRANT_API_KEY"),
         "website_url": os.getenv("WEBSITE_URL", "https://ai-and-humanoid-robotic-course.vercel.app/")
     }
 
 
-def retrieve_chunks_for_query(cohere_client, qdrant_client, query: str, top_k: int = 5, similarity_threshold: float = 0.0):
+def retrieve_chunks_for_query(gemini_client, qdrant_client, query: str, top_k: int = 5, similarity_threshold: float = 0.0):
     """
     Complete retrieval pipeline: embed query and search for similar chunks
     """
@@ -79,7 +80,7 @@ def retrieve_chunks_for_query(cohere_client, qdrant_client, query: str, top_k: i
         processed_query = preprocess_query(query)
 
         # Generate embedding for the query
-        query_embedding = embed_query(cohere_client, processed_query)
+        query_embedding = embed_query(gemini_client, processed_query)
 
         if query_embedding is None:
             print("Failed to generate embedding for query")
@@ -245,7 +246,7 @@ def test_metadata_preservation_with_query_types():
 
     try:
         # Initialize clients
-        cohere_client = initialize_cohere_client()
+        gemini_client = initialize_gemini_client()
         qdrant_client = initialize_qdrant_client()
     except Exception as e:
         print(f"Failed to initialize clients for metadata testing: {str(e)}")
@@ -268,7 +269,7 @@ def test_metadata_preservation_with_query_types():
 
         # Process the query
         results = retrieve_chunks_for_query(
-            cohere_client=cohere_client,
+            gemini_client=gemini_client,
             qdrant_client=qdrant_client,
             query=query,
             top_k=2,
@@ -380,7 +381,7 @@ def validate_metadata_across_content_modules():
 
     try:
         # Initialize clients
-        cohere_client = initialize_cohere_client()
+        gemini_client = initialize_gemini_client()
         qdrant_client = initialize_qdrant_client()
     except Exception as e:
         print(f"Failed to initialize clients for metadata validation: {str(e)}")
@@ -404,7 +405,7 @@ def validate_metadata_across_content_modules():
 
         # Perform retrieval
         results = retrieve_chunks_for_query(
-            cohere_client=cohere_client,
+            gemini_client=gemini_client,
             qdrant_client=qdrant_client,
             query=query,
             top_k=2,
@@ -543,7 +544,7 @@ def measure_retrieval_latency(func, *args, **kwargs) -> Tuple[float, any]:
         return latency, None
 
 
-def benchmark_retrieval_performance(cohere_client, qdrant_client, test_queries: List[str], top_k_values: List[int] = [3, 5, 10]):
+def benchmark_retrieval_performance(gemini_client, qdrant_client, test_queries: List[str], top_k_values: List[int] = [3, 5, 10]):
     """
     Benchmark retrieval performance across different configuration parameters
     """
@@ -559,7 +560,7 @@ def benchmark_retrieval_performance(cohere_client, qdrant_client, test_queries: 
 
         for query in test_queries:
             # Embed the query
-            query_embedding = embed_query(cohere_client, query)
+            query_embedding = embed_query(gemini_client, query)
 
             if query_embedding is not None:
                 # Measure retrieval latency
@@ -605,7 +606,7 @@ def test_retrieval_performance_with_different_configs():
 
     try:
         # Initialize clients
-        cohere_client = initialize_cohere_client()
+        gemini_client = initialize_gemini_client()
         qdrant_client = initialize_qdrant_client()
     except Exception as e:
         print(f"Failed to initialize clients for performance testing: {str(e)}")
@@ -632,7 +633,7 @@ def test_retrieval_performance_with_different_configs():
 
         for query in test_queries:
             # Embed the query
-            query_embedding = embed_query(cohere_client, query)
+            query_embedding = embed_query(gemini_client, query)
 
             if query_embedding is not None:
                 # Measure retrieval latency
@@ -755,7 +756,7 @@ def validate_performance_meets_interactive_requirements():
 
     try:
         # Initialize clients
-        cohere_client = initialize_cohere_client()
+        gemini_client = initialize_gemini_client()
         qdrant_client = initialize_qdrant_client()
     except Exception as e:
         print(f"Failed to initialize clients for performance validation: {str(e)}")
@@ -782,7 +783,7 @@ def validate_performance_meets_interactive_requirements():
         track_progress(i + 1, total_tests, "Performance validation")
 
         # Embed the query
-        query_embedding = embed_query(cohere_client, query)
+        query_embedding = embed_query(gemini_client, query)
 
         if query_embedding is not None:
             # Measure retrieval time
@@ -892,98 +893,100 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVE
     return chunks
 
 
-def embed(cohere_client, text_chunks: List[str]) -> List[List[float]]:
+def embed(gemini_client, text_chunks: List[str]) -> List[List[float]]:
     """
-    Generate semantic embeddings for text chunks using Cohere
+    Generate semantic embeddings for text chunks using Gemini
     """
     if not text_chunks:
         return []
 
-    # Process in batches to stay within API limits
+    # Process one chunk at a time to minimize rate limit issues
     all_embeddings = []
 
-    for i in range(0, len(text_chunks), EMBEDDING_BATCH_SIZE):
-        batch = text_chunks[i:i + EMBEDDING_BATCH_SIZE]
-
+    for i, text in enumerate(text_chunks):
         retry_count = 0
         while retry_count < MAX_RETRIES:
             try:
-                response = cohere_client.embed(
-                    texts=batch,
-                    model="embed-english-v3.0",  # Using Cohere's latest embedding model
-                    input_type="search_document"  # Optimize for search documents
+                result = genai.embed_content(
+                    model=gemini_client,  # Use the model name
+                    content=text,  # Pass text directly instead of list
+                    task_type="RETRIEVAL_DOCUMENT"  # Optimize for document retrieval
                 )
 
                 # Extract embeddings from the response
-                batch_embeddings = [embedding for embedding in response.embeddings]
-                all_embeddings.extend(batch_embeddings)
+                if result and result['embedding']:
+                    batch_embeddings = [result['embedding']]  # Wrap in list to match expected format
+                    all_embeddings.extend(batch_embeddings)
+                else:
+                    print(f"No embedding returned for chunk {i}, adding empty embedding")
+                    all_embeddings.append([])  # Add empty embedding on failure
+                    break
+
+                # Add delay between API calls to respect rate limits
+                time.sleep(0.1)  # 100ms delay between each embedding call
                 break  # Success, break out of retry loop
 
-            except cohere.CohereAPIError as e:
-                if "rate_limit" in str(e).lower() or e.status_code == 429:
-                    print(f"Rate limit hit, waiting before retry {retry_count + 1}/{MAX_RETRIES}")
-                    time.sleep(2 ** retry_count)  # Exponential backoff
+            except Exception as e:
+                if "rate_limit" in str(e).lower() or "quota" in str(e).lower() or "429" in str(e):
+                    print(f"Gemini rate limit/quota hit, waiting before retry {retry_count + 1}/{MAX_RETRIES}")
+                    wait_time = 2 ** retry_count  # Exponential backoff
+                    time.sleep(wait_time)
                     retry_count += 1
                     continue
                 elif "quota" in str(e).lower() or "credit" in str(e).lower():
-                    print(f"API quota exceeded: {str(e)}")
+                    print(f"Gemini API quota exceeded: {str(e)}")
                     # Graceful degradation: return partial results
-                    # Add empty embeddings for remaining batches
-                    remaining_batches = (len(text_chunks) - i) // EMBEDDING_BATCH_SIZE
-                    if (len(text_chunks) - i) % EMBEDDING_BATCH_SIZE:
-                        remaining_batches += 1
-                    all_embeddings.extend([[] for _ in range(remaining_batches * EMBEDDING_BATCH_SIZE)])
+                    # Add empty embeddings for remaining chunks
+                    remaining_chunks = len(text_chunks) - i
+                    all_embeddings.extend([[] for _ in range(remaining_chunks)])
                     break  # Stop processing, quota exceeded
                 else:
-                    print(f"Cohere API error: {str(e)}")
+                    print(f"Gemini API error: {str(e)}")
                     # Don't retry for other API errors
                     break
             except Exception as e:
-                print(f"Error generating embeddings for batch: {str(e)}")
+                print(f"Error generating embedding for text: {str(e)}")
                 retry_count += 1
                 if retry_count >= MAX_RETRIES:
-                    # If we've exhausted retries, add empty embeddings for this batch
-                    all_embeddings.extend([[] for _ in range(len(batch))])
+                    # If we've exhausted retries, add empty embedding for this chunk
+                    all_embeddings.append([])
                 else:
                     time.sleep(2 ** retry_count)  # Exponential backoff
 
     return all_embeddings
 
 
-def embed_query(cohere_client, query_text: str) -> Optional[List[float]]:
+def embed_query(gemini_client, query_text: str) -> Optional[List[float]]:
     """
-    Generate embedding for a single query text using Cohere
+    Generate embedding for a single query text using Gemini
     """
     if not query_text:
         return None
 
     try:
-        response = cohere_client.embed(
-            texts=[query_text],
-            model="embed-english-v3.0",  # Using Cohere's latest embedding model
-            input_type="search_query"  # Optimize for search queries
+        result = genai.embed_content(
+            model=gemini_client,  # Use the model name
+            content=query_text,  # Pass text directly instead of list
+            task_type="RETRIEVAL_QUERY"  # Optimize for query retrieval
         )
 
-        # Extract the embedding from the response (first and only result)
-        if response.embeddings and len(response.embeddings) > 0:
-            return response.embeddings[0]
+        # Extract the embedding from the response
+        if result and result['embedding']:
+            return result['embedding']
 
         return None
 
-    except cohere.CohereAPIError as e:
-        if "rate_limit" in str(e).lower() or e.status_code == 429:
-            print(f"Rate limit hit when embedding query: {str(e)}")
+    except Exception as e:
+        if "rate_limit" in str(e).lower() or "quota" in str(e).lower() or "429" in str(e):
+            print(f"Rate limit/quota hit when embedding query: {str(e)}")
             handle_rate_limit_error()
             return None
         elif "quota" in str(e).lower() or "credit" in str(e).lower():
-            print(f"API quota exceeded when embedding query: {str(e)}")
+            print(f"Gemini API quota exceeded when embedding query: {str(e)}")
             return None
         else:
-            print(f"Cohere API error when embedding query: {str(e)}")
+            print(f"Gemini API error when embedding query: {str(e)}")
             return None
-    except Exception as e:
-        print(f"Error generating embedding for query: {str(e)}")
-        return None
 
 
 def preprocess_query(query: str) -> str:
@@ -1102,7 +1105,7 @@ def comprehensive_error_handler(func):
 
 
 @comprehensive_error_handler
-def retrieve_chunks_for_query_with_retry(cohere_client, qdrant_client, query: str, top_k: int = 5, similarity_threshold: float = 0.3, collection_name: str = "rag_embedding", max_retries: int = MAX_RETRIES):
+def retrieve_chunks_for_query_with_retry(gemini_client, qdrant_client, query: str, top_k: int = 5, similarity_threshold: float = 0.3, collection_name: str = "rag_embedding", max_retries: int = MAX_RETRIES):
     """
     Retrieve semantically similar content chunks for a given query with retry logic
     """
@@ -1118,7 +1121,7 @@ def retrieve_chunks_for_query_with_retry(cohere_client, qdrant_client, query: st
                 return []
 
             # Generate embedding for the query
-            query_embedding = embed_query(cohere_client, processed_query)
+            query_embedding = embed_query(gemini_client, processed_query)
 
             if query_embedding is None or len(query_embedding) == 0:
                 print(f"Failed to generate embedding for query: {query}")
@@ -1176,13 +1179,13 @@ def create_collection(qdrant_client, collection_name: str = "rag_embedding"):
             collection_names = [collection.name for collection in collections.collections]
 
             if collection_name not in collection_names:
-                # Create the collection with appropriate vector size for Cohere embeddings
-                # Cohere's embed-english-v3.0 returns 1024-dimension vectors when using float32
+                # Create the collection with appropriate vector size for Gemini embeddings
+                # Gemini's embedding-001 returns 768-dimension vectors
                 qdrant_client.recreate_collection(
                     collection_name=collection_name,
-                    vectors_config=models.VectorParams(size=1024, distance=models.Distance.COSINE),
+                    vectors_config=models.VectorParams(size=768, distance=models.Distance.COSINE),
                 )
-                print(f"Collection '{collection_name}' created successfully with 1024-dimensional vectors.")
+                print(f"Collection '{collection_name}' created successfully with 768-dimensional vectors.")
             else:
                 print(f"Collection '{collection_name}' already exists.")
 
@@ -1214,7 +1217,7 @@ def save_chunk_to_qdrant(qdrant_client, text_chunk: str, embedding: List[float],
         raise ValueError("Embedding cannot be empty")
 
     # Verify embedding dimension matches expected size for the collection
-    expected_dimension = 1024  # Standard for Cohere's embed-english-v3.0 model
+    expected_dimension = 768  # Standard for Gemini's embedding-001 model
     if len(embedding) != expected_dimension:
         print(f"Warning: Embedding dimension mismatch. Expected {expected_dimension}, got {len(embedding)}")
         # Adjust the collection vector size if needed, or skip this chunk
@@ -1298,13 +1301,13 @@ def search_similar_chunks(qdrant_client, query_embedding: List[float], collectio
         return []
 
 
-def retrieve_chunks_for_query(cohere_client, qdrant_client, query: str, top_k: int = 5, similarity_threshold: float = 0.0):
+def retrieve_chunks_for_query(gemini_client, qdrant_client, query: str, top_k: int = 5, similarity_threshold: float = 0.0):
     """
     Complete retrieval pipeline: embed query and search for similar chunks
     """
     try:
         # Generate embedding for the query
-        query_embeddings = embed(cohere_client, [query])
+        query_embeddings = embed(gemini_client, [query])
 
         if not query_embeddings or len(query_embeddings) == 0:
             print("Failed to generate embedding for query")
@@ -1343,7 +1346,7 @@ def test_semantic_search_with_sample_queries():
 
     # Initialize clients
     try:
-        cohere_client = initialize_cohere_client()
+        gemini_client = initialize_gemini_client()
         qdrant_client = initialize_qdrant_client()
     except Exception as e:
         print(f"Failed to initialize clients for testing: {str(e)}")
@@ -1367,7 +1370,7 @@ def test_semantic_search_with_sample_queries():
         processed_query = preprocess_query(query)
 
         # Generate embedding for the query
-        query_embedding = embed_query(cohere_client, processed_query)
+        query_embedding = embed_query(gemini_client, processed_query)
 
         if query_embedding is None:
             print(f"    ❌ Failed to generate embedding for query: {query}")
@@ -1541,7 +1544,7 @@ def test_complete_pipeline_from_query_to_validated_results():
 
     try:
         # Initialize clients
-        cohere_client = initialize_cohere_client()
+        gemini_client = initialize_gemini_client()
         qdrant_client = initialize_qdrant_client()
     except Exception as e:
         print(f"Failed to initialize clients for pipeline testing: {str(e)}")
@@ -1571,7 +1574,7 @@ def test_complete_pipeline_from_query_to_validated_results():
 
         # Process the query through the complete pipeline
         results = retrieve_chunks_for_query(
-            cohere_client=cohere_client,
+            gemini_client=gemini_client,
             qdrant_client=qdrant_client,
             query=query,
             top_k=5,
@@ -1672,7 +1675,7 @@ def main():
     print("Starting vector retrieval and validation pipeline...")
 
     # Initialize clients and configuration
-    cohere_client = initialize_cohere_client()
+    gemini_client = initialize_gemini_client()
     qdrant_client = initialize_qdrant_client()
 
     # Get base URL from environment or use default
@@ -1734,7 +1737,7 @@ def main():
     # Measure retrieval latency
     start_time = time.time()
     results = retrieve_chunks_for_query_with_retry(
-        cohere_client=cohere_client,
+        gemini_client=gemini_client,
         qdrant_client=qdrant_client,
         query=query,
         top_k=top_k,

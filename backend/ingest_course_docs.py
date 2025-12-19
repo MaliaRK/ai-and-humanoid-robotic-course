@@ -1,372 +1,336 @@
-#!/usr/bin/env python3
-"""
-Ingestion script to load AI & Humanoid Robotics course documentation into Qdrant
-This script will read all markdown files from the course documentation and create embeddings
-"""
-
 import os
-import re
-from pathlib import Path
-import cohere
+import requests
+from bs4 import BeautifulSoup
+import xml.etree.ElementTree as ET
+from typing import List, Dict, Any
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
-from dotenv import load_dotenv
-import time
+from qdrant_client.models import PointStruct
 import logging
-from typing import List, Dict
+from urllib.parse import urljoin, urlparse
+import time
 import uuid
-import markdown
-from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+from sentence_transformers import SentenceTransformer
 
-# Load environment variables
-load_dotenv()
+# Load environment variables from the project root
+import sys
+from pathlib import Path
+# Add the project root to the path so we can load .env from there
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+load_dotenv(dotenv_path=project_root / ".env")
 
-# Configuration constants
-CHUNK_SIZE = 256  # Reduced size to manage memory better
-CHUNK_OVERLAP = 25  # Reduced overlap to manage memory better
-EMBEDDING_BATCH_SIZE = 3  # Smaller batch size for memory management
-MAX_RETRIES = 3  # Maximum number of retries for failed requests
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-def initialize_cohere_client():
-    """Initialize Cohere client with API key from environment variables"""
-    api_key = os.getenv("COHERE_API_KEY")
-    if not api_key:
-        raise ValueError("COHERE_API_KEY environment variable is required")
+class DocusaurusEmbeddingPipeline:
+    def __init__(self):
+        # Initialize sentence transformer model
+        self.model = SentenceTransformer('all-MiniLM-L6-v2')  # Lightweight model for local embeddings
 
-    try:
-        return cohere.Client(api_key)
-    except Exception as e:
-        raise ConnectionError(f"Failed to initialize Cohere client: {str(e)}")
+        # Local model returns 384-dimensional vectors
+        self.vector_size = 384
 
-def initialize_qdrant_client():
-    """Initialize Qdrant client with connection details from environment variables"""
-    url = os.getenv("QDRANT_URL")
-    api_key = os.getenv("QDRANT_API_KEY")
+        # Initialize Qdrant client
+        qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
+        qdrant_api_key = os.getenv("QDRANT_API_KEY")
 
-    if not url or not api_key:
-        raise ValueError("QDRANT_URL and QDRANT_API_KEY environment variables are required")
-
-    try:
-        return QdrantClient(url=url, api_key=api_key)
-    except Exception as e:
-        raise ConnectionError(f"Failed to initialize Qdrant client: {str(e)}")
-
-def create_collection(qdrant_client, collection_name: str = "ai_book_embedding"):
-    """
-    Create a Qdrant collection for storing embeddings
-    """
-    try:
-        # Check if collection already exists
-        collections = qdrant_client.get_collections()
-        collection_names = [collection.name for collection in collections.collections]
-
-        if collection_name not in collection_names:
-            # Create the collection with appropriate vector size for Cohere embeddings
-            # Cohere's embed-english-v3.0 returns 1024-dimension vectors
-            qdrant_client.recreate_collection(
-                collection_name=collection_name,
-                vectors_config=models.VectorParams(size=1024, distance=models.Distance.COSINE),
-            )
-            print(f"Collection '{collection_name}' created successfully with 1024-dimensional vectors.")
+        if qdrant_api_key:
+            self.qdrant_client = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
         else:
-            print(f"Collection '{collection_name}' already exists.")
-            # Clear existing collection to start fresh
-            qdrant_client.delete_collection(collection_name)
-            qdrant_client.recreate_collection(
-                collection_name=collection_name,
-                vectors_config=models.VectorParams(size=1024, distance=models.Distance.COSINE),
-            )
-            print(f"Collection '{collection_name}' cleared and recreated.")
+            self.qdrant_client = QdrantClient(url=qdrant_url)
 
-        return True  # Success
+        # Target URL for the Docusaurus site
+        self.target_url = "https://ai-and-humanoid-robotic-course.vercel.app/"
 
-    except Exception as e:
-        print(f"Error creating collection '{collection_name}': {str(e)}")
-        raise
+    def get_all_urls(self, base_url: str) -> List[str]:
+        """
+        Extract all URLs from a deployed Docusaurus site using sitemap
+        """
+        urls = []
 
-def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
-    """
-    Split text into overlapping chunks
-    """
-    chunks = []
-    start = 0
-    text_len = len(text)
+        try:
+            # Try to get URLs from sitemap first
+            sitemap_url = urljoin(base_url, "sitemap.xml")
+            response = requests.get(sitemap_url)
 
-    while start < text_len:
-        end = start + chunk_size
+            if response.status_code == 200:
+                root = ET.fromstring(response.content)
 
-        # If we're near the end, just take the remainder
-        if end > text_len:
-            end = text_len
-
-        chunk = text[start:end]
-        chunks.append(chunk)
-
-        # Move start position by chunk_size minus overlap
-        # If this would not advance the position (end - overlap <= start), advance by 1 to avoid infinite loop
-        next_start = end - overlap
-        if next_start <= start:
-            start = start + 1
-        else:
-            start = next_start
-
-    # Debug: print how many chunks were created
-    print(f"  Chunked text of length {text_len} into {len(chunks)} chunks (chunk_size={chunk_size}, overlap={overlap})")
-
-    return chunks
-
-def embed(cohere_client, text_chunks: List[str]) -> List[List[float]]:
-    """
-    Generate semantic embeddings for text chunks using Cohere
-    """
-    if not text_chunks:
-        return []
-
-    print(f"Generating embeddings for {len(text_chunks)} text chunks...")
-
-    # Process in batches to stay within API limits
-    all_embeddings = []
-
-    for i in range(0, len(text_chunks), EMBEDDING_BATCH_SIZE):
-        batch = text_chunks[i:i + EMBEDDING_BATCH_SIZE]
-
-        retry_count = 0
-        while retry_count < MAX_RETRIES:
-            try:
-                response = cohere_client.embed(
-                    texts=batch,
-                    model="embed-english-v3.0",  # Using Cohere's latest embedding model
-                    input_type="search_document"  # Optimize for search documents
-                )
-
-                # Extract embeddings from the response
-                batch_embeddings = response.embeddings
-                all_embeddings.extend(batch_embeddings)
-
-                print(f"  Processed batch of {len(batch)} chunks, got {len(batch_embeddings)} embeddings")
-                break  # Success, break out of retry loop
-
-            except Exception as e:
-                # Check if it's a rate limit error
-                error_str = str(e)
-                if "rate_limit" in error_str.lower() or "TooManyRequests" in error_str or "429" in error_str:
-                    print(f"  Rate limit hit, waiting before retry {retry_count + 1}/{MAX_RETRIES}")
-                    time.sleep(2 ** retry_count)  # Exponential backoff
-                    retry_count += 1
-                    continue
+                # Handle both sitemap index and regular sitemap
+                if root.tag.endswith('sitemapindex'):
+                    # If it's a sitemap index, get individual sitemaps
+                    for sitemap in root.findall('.//{http://www.sitemaps.org/schemas/sitemap/0.9}loc'):
+                        sitemap_response = requests.get(sitemap.text)
+                        if sitemap_response.status_code == 200:
+                            sitemap_root = ET.fromstring(sitemap_response.content)
+                            for url_elem in sitemap_root.findall('.//{http://www.sitemaps.org/schemas/sitemap/0.9}loc'):
+                                # Replace placeholder domain with actual domain
+                                url = url_elem.text.replace("https://your-docusaurus-site.example.com", "https://ai-and-humanoid-robotic-course.vercel.app")
+                                urls.append(url)
                 else:
-                    print(f"  Cohere API error: {str(e)}")
-                    retry_count += 1
-                    if retry_count >= MAX_RETRIES:
-                        # If we've exhausted retries, add empty embeddings for this batch
-                        all_embeddings.extend([[] for _ in range(len(batch))])
-                    else:
-                        time.sleep(2 ** retry_count)  # Exponential backoff
+                    # Regular sitemap
+                    for url_elem in root.findall('.//{http://www.sitemaps.org/schemas/sitemap/0.9}loc'):
+                        # Replace placeholder domain with actual domain
+                        url = url_elem.text.replace("https://your-docusaurus-site.example.com", "https://ai-and-humanoid-robotic-course.vercel.app")
+                        urls.append(url)
+            else:
+                # Fallback: try to crawl the site by looking for links
+                logger.info(f"Sitemap not found at {sitemap_url}, attempting to crawl...")
 
-    return all_embeddings
+                # Get the main page and extract links
+                response = requests.get(base_url)
+                soup = BeautifulSoup(response.content, 'html.parser')
 
-def save_chunk_to_qdrant(qdrant_client, text_chunk: str, embedding: List[float], metadata: Dict, collection_name: str = "ai_book_embedding"):
-    """
-    Save a text chunk with its embedding and metadata to Qdrant
-    """
-    if not embedding or len(embedding) == 0:
-        print(f"Warning: Skipping chunk with empty embedding")
-        return None
+                # Find all links within the page
+                for link in soup.find_all('a', href=True):
+                    href = link['href']
+                    full_url = urljoin(base_url, href)
 
-    # Verify embedding dimension matches expected size for the collection
-    expected_dimension = 1024  # Standard for Cohere's embed-english-v3.0 model
-    if len(embedding) != expected_dimension:
-        print(f"Warning: Embedding dimension mismatch. Expected {expected_dimension}, got {len(embedding)}")
+                    # Only add URLs from the same domain
+                    if urlparse(full_url).netloc == urlparse(base_url).netloc:
+                        if full_url not in urls and full_url.startswith(base_url):
+                            urls.append(full_url)
 
-    try:
-        point_id = str(uuid.uuid4())
+        except Exception as e:
+            logger.error(f"Error getting URLs from {base_url}: {e}")
 
-        # Prepare the record for Qdrant
-        record = models.PointStruct(
-            id=point_id,
-            vector=embedding,
-            payload={
-                "text": text_chunk,
-                "source_url": metadata.get("source_url", ""),
-                "module_name": metadata.get("module_name", ""),
-                "chunk_index": metadata.get("chunk_index", 0),
-                "title": metadata.get("title", ""),
-                "file_path": metadata.get("file_path", "")
+        return urls
+
+    def extract_text_from_url(self, url: str) -> str:
+        """
+        Extract and clean text from a single URL
+        """
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.content, 'html.parser')
+
+            # Remove script and style elements
+            for script in soup(["script", "style"]):
+                script.decompose()
+
+            # Look for main content containers typically used in Docusaurus
+            # Try multiple selectors to find the main content
+            content_selectors = [
+                'article',  # Main article content
+                '.markdown',  # Docusaurus markdown content
+                '.theme-doc-markdown',  # Docusaurus theme markdown
+                '.main-wrapper',  # Main content wrapper
+                'main',  # Main content area
+                '.container',  # Container with content
+                '[role="main"]'  # Main role
+            ]
+
+            content = ""
+            for selector in content_selectors:
+                elements = soup.select(selector)
+                if elements:
+                    for element in elements:
+                        # Get text but try to preserve some structure
+                        text = element.get_text(separator=' ', strip=True)
+                        if len(text) > len(content):
+                            content = text
+                    break
+
+            # If no specific content found, get all body text
+            if not content:
+                body = soup.find('body')
+                if body:
+                    content = body.get_text(separator=' ', strip=True)
+
+            # Clean up the text
+            lines = (line.strip() for line in content.splitlines())
+            chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+            content = ' '.join(chunk for chunk in chunks if chunk)
+
+            return content
+
+        except Exception as e:
+            logger.error(f"Error extracting text from {url}: {e}")
+            return ""
+
+    def chunk_text(self, text: str, chunk_size: int = 1000, overlap: int = 100) -> List[str]:
+        """
+        Split text into chunks with overlap to preserve context
+        """
+        if len(text) <= chunk_size:
+            return [text]
+
+        chunks = []
+        start = 0
+
+        while start < len(text):
+            end = start + chunk_size
+            chunk = text[start:end]
+            chunks.append(chunk)
+
+            # Move start position by chunk_size - overlap
+            start = end - overlap
+
+            # If remaining text is less than chunk_size, add it as final chunk
+            if len(text) - start < chunk_size:
+                if start < len(text):
+                    final_chunk = text[start:]
+                    if final_chunk not in chunks:  # Avoid duplicate chunks
+                        chunks.append(final_chunk)
+                break
+
+        return chunks
+
+    def embed(self, text: str) -> List[float]:
+        """
+        Generate embedding for text using local sentence transformer model
+        """
+        try:
+            # Generate embedding using local model
+            embedding = self.model.encode([text])[0].tolist()
+            return embedding
+        except Exception as e:
+            logger.error(f"Error generating embedding for text: {e}")
+            return []
+
+    def create_collection(self, collection_name: str = "ai_book_embedding"):
+        """
+        Create a Qdrant collection for storing embeddings
+        """
+        try:
+            # Check if collection already exists
+            collections = self.qdrant_client.get_collections()
+            collection_names = [col.name for col in collections.collections]
+
+            if collection_name in collection_names:
+                logger.info(f"Collection {collection_name} already exists")
+                return
+
+            # Create collection with appropriate vector size (384 for sentence transformer embeddings)
+            self.qdrant_client.create_collection(
+                collection_name=collection_name,
+                vectors_config=models.VectorParams(size=384, distance=models.Distance.COSINE)
+            )
+
+            logger.info(f"Created collection {collection_name} with 384-dimension vectors")
+
+        except Exception as e:
+            logger.error(f"Error creating collection {collection_name}: {e}")
+            raise
+
+    def save_chunk_to_qdrant(self, content: str, url: str, embedding: List[float], position: int, collection_name: str = "ai_book_embedding"):
+        """
+        Save a text chunk with its embedding to Qdrant
+        """
+        try:
+            # Generate a unique ID for the point
+            point_id = str(uuid.uuid4())
+
+            # Prepare the payload with metadata
+            payload = {
+                "content": content,
+                "source_url": url,
+                "chunk_index": position,
+                "created_at": time.time()
             }
-        )
 
-        # Upsert the record into the collection
-        qdrant_client.upsert(
-            collection_name=collection_name,
-            points=[record]
-        )
+            # Create and upload the point to Qdrant
+            points = [PointStruct(
+                id=point_id,
+                vector=embedding,
+                payload=payload
+            )]
 
-        print(f"Saved chunk to Qdrant: {metadata.get('title', 'Unknown')} - ID: {point_id[:8]}...")
-        return point_id
+            self.qdrant_client.upsert(
+                collection_name=collection_name,
+                points=points
+            )
 
-    except Exception as e:
-        print(f"Error saving chunk to Qdrant: {str(e)}")
-        raise
-
-def extract_title_from_markdown(content: str) -> str:
-    """
-    Extract the first heading (title) from markdown content
-    """
-    lines = content.split('\n')
-    for line in lines:
-        if line.strip().startswith('# '):
-            return line.strip()[2:]  # Remove '# ' prefix
-        elif line.strip().startswith('## '):
-            return line.strip()[3:]  # Remove '## ' prefix
-    return "Untitled"
-
-def read_markdown_files(docs_dir: str) -> List[Dict[str, str]]:
-    """
-    Recursively read all markdown files from the documentation directory
-    """
-    docs_dir = Path(docs_dir)
-    markdown_files = []
-
-    for md_file in docs_dir.rglob("*.[mM][dD][xX]"):
-        try:
-            with open(md_file, 'r', encoding='utf-8') as f:
-                content = f.read()
-
-            # Extract title from content
-            title = extract_title_from_markdown(content)
-
-            # Create a relative path for the source URL
-            relative_path = md_file.relative_to(docs_dir.parent if docs_dir.parent.name == 'docs' else docs_dir)
-
-            markdown_files.append({
-                'content': content,
-                'title': title,
-                'file_path': str(relative_path),
-                'source_url': f"https://ai-humanoid-robotics-course.com/docs/{relative_path}"
-            })
-
-            print(f"Loaded: {title} from {relative_path}")
+            logger.info(f"Saved chunk to Qdrant: {url} (position {position})")
+            return True
 
         except Exception as e:
-            print(f"❌ Error reading {md_file}: {str(e)}")
-
-    # Also look for regular .md files
-    for md_file in docs_dir.rglob("*.md"):
-        try:
-            with open(md_file, 'r', encoding='utf-8') as f:
-                content = f.read()
-
-            # Extract title from content
-            title = extract_title_from_markdown(content)
-
-            # Create a relative path for the source URL
-            relative_path = md_file.relative_to(docs_dir.parent if docs_dir.parent.name == 'docs' else docs_dir)
-
-            markdown_files.append({
-                'content': content,
-                'title': title,
-                'file_path': str(relative_path),
-                'source_url': f"https://ai-humanoid-robotics-course.com/docs/{relative_path}"
-            })
-
-            print(f"Loaded: {title} from {relative_path}")
-
-        except Exception as e:
-            print(f"Error reading {md_file}: {str(e)}")
-
-    return markdown_files
+            logger.error(f"Error saving chunk to Qdrant: {e}")
+            return False
 
 def main():
-    """Main function to ingest course documentation into Qdrant"""
-    print("Starting Course Documentation Ingestion")
-    print("=" * 50)
+    """
+    Main function to execute the complete pipeline
+    """
+    logger.info("Starting Docusaurus Embedding Pipeline...")
+
+    # Initialize the pipeline
+    pipeline = DocusaurusEmbeddingPipeline()
 
     try:
-        # Initialize clients
-        print("Initializing clients...")
-        cohere_client = initialize_cohere_client()
-        qdrant_client = initialize_qdrant_client()
-        print("Clients initialized successfully")
+        # Step 1: Create the Qdrant collection
+        logger.info("Creating Qdrant collection...")
+        pipeline.create_collection("ai_book_embedding")
 
-        # Create the collection
-        print("\nCreating Qdrant collection...")
-        create_collection(qdrant_client, "ai_book_embedding")
+        # Step 2: Get all URLs from the target Docusaurus site
+        logger.info(f"Extracting URLs from {pipeline.target_url}...")
+        urls = pipeline.get_all_urls(pipeline.target_url)
 
-        # Read all markdown files from documentation
-        print("\nReading course documentation files...")
-        docs_path = "../docs"
-        markdown_files = read_markdown_files(docs_path)
-
-        if not markdown_files:
-            print("No markdown files found in the documentation directory")
+        if not urls:
+            logger.warning(f"No URLs found at {pipeline.target_url}")
             return
 
-        print(f"Loaded {len(markdown_files)} markdown files")
+        # Filter to only include module 1, 2, 3, and 4 documents for today's submission
+        module_urls = [url for url in urls if any(f"/module-{i}" in url.lower() for i in range(1, 5))]
+        urls = module_urls
+        logger.info(f"Filtered to {len(urls)} URLs for modules 1, 2, 3, and 4 for today's submission")
 
-        # Process each file one at a time to manage memory
+        # Step 3: Process each URL
         total_chunks = 0
-        for i, file_data in enumerate(markdown_files):
-            print(f"\nProcessing file {i+1}/{len(markdown_files)}: {file_data['title']}")
-            print(f"  File path: {file_data['file_path']}")
-            print(f"  Content length: {len(file_data['content'])} characters")
+        for i, url in enumerate(urls):
+            logger.info(f"Processing URL {i+1}/{len(urls)}: {url}")
 
-            # Convert markdown to plain text
-            html = markdown.markdown(file_data['content'])
-            soup = BeautifulSoup(html, 'html.parser')
-            plain_text = soup.get_text()
-            print(f"  Plain text length: {len(plain_text)} characters")
+            # Extract text from the URL
+            text_content = pipeline.extract_text_from_url(url)
 
-            # Split content into chunks
-            chunks = chunk_text(plain_text)
-            print(f"  Split into {len(chunks)} chunks")
+            if not text_content:
+                logger.warning(f"No content extracted from {url}")
+                continue
 
-            # Process chunks in smaller batches to manage memory
-            batch_size = EMBEDDING_BATCH_SIZE  # Use the same size as embedding batch
-            for batch_start in range(0, len(chunks), batch_size):
-                batch_chunks = chunks[batch_start:batch_start + batch_size]
+            logger.info(f"Extracted {len(text_content)} characters from {url}")
 
-                # Generate embeddings for this batch
-                embeddings = embed(cohere_client, batch_chunks)
+            # Chunk the text
+            chunks = pipeline.chunk_text(text_content)
+            logger.info(f"Created {len(chunks)} chunks from {url}")
 
-                # Save each chunk in the batch to Qdrant
-                print(f"Saving batch {batch_start//batch_size + 1} to Qdrant...")
-                for j, (chunk, embedding) in enumerate(zip(batch_chunks, embeddings)):
-                    if len(embedding) > 0:  # Only save if embedding is not empty
-                        metadata = {
-                            "source_url": file_data['source_url'],
-                            "module_name": file_data['file_path'].split('/')[0] if '/' in file_data['file_path'] else 'general',
-                            "chunk_index": batch_start + j,  # Global chunk index
-                            "title": file_data['title'],
-                            "file_path": file_data['file_path']
-                        }
+            # Process each chunk
+            for j, chunk in enumerate(chunks):
+                if not chunk.strip():
+                    continue
 
-                        point_id = save_chunk_to_qdrant(qdrant_client, chunk, embedding, metadata, "ai_book_embedding")
-                        if point_id:
-                            total_chunks += 1
+                # Generate embedding
+                embedding = pipeline.embed(chunk)
 
-                # Clean up batch variables to free memory
-                del batch_chunks, embeddings
+                if not embedding:
+                    logger.error(f"Failed to generate embedding for chunk {j} of {url}")
+                    continue
 
-            # Clean up file variables to free memory after processing each file
-            del html, soup, plain_text, chunks
+                # Save to Qdrant
+                success = pipeline.save_chunk_to_qdrant(
+                    content=chunk,
+                    url=url,
+                    embedding=embedding,
+                    position=j
+                )
 
-        print(f"\nSuccess! Ingestion completed!")
-        print(f"Total chunks ingested: {total_chunks}")
-        print(f"Check your Qdrant Cloud dashboard for the 'ai_book_embedding' collection.")
+                if success:
+                    total_chunks += 1
+                    logger.info(f"Successfully saved chunk {j} of {url} to Qdrant")
+                    # Add longer delay to stay within free tier rate limits
+                    time.sleep(60)  # 60 seconds delay between chunks to stay within free tier limits
+                else:
+                    logger.error(f"Failed to save chunk {j} of {url} to Qdrant")
 
-        # Verify the collection has content
-        collection_info = qdrant_client.get_collection("ai_book_embedding")
-        print(f"Collection points count: {collection_info.points_count}")
+        logger.info(f"Pipeline completed successfully! Total chunks saved: {total_chunks}")
 
     except Exception as e:
-        print(f"Error during ingestion: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        print("\n Troubleshooting tips:")
-        print("1. Verify your COHERE_API_KEY is correct and has sufficient credits")
-        print("2. Verify your QDRANT_URL and QDRANT_API_KEY are correct")
-        print("3. Check that both services are accessible from your network")
-        print("4. Ensure you have installed all required packages: pip install -r requirements.txt")
+        logger.error(f"Pipeline failed with error: {e}")
+        raise
 
 if __name__ == "__main__":
     main()
